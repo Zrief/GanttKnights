@@ -42,7 +42,7 @@ for ii in range(len(df.iloc[:, 2])):
         else:
             df.iloc[ii, 2] = str(df.iloc[ii, 1] + timedelta(days=int(df.iloc[ii, 2])))
 
-df.iloc[:, 2] = [parse(ii) for ii in df.iloc[:, 2]]  # 结束日期标准化
+df.iloc[:, 2] = [parse(ii) for ii in df.iloc[:, 2]]  # 结束日期标准化至4点
 
 now = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 today_weekday = now.weekday()
@@ -53,7 +53,7 @@ left_border = now - timedelta(days=左边界距今天)  # 绘图的左边界时�
 right_border = now + timedelta(days=右边界距本周一 - today_weekday)  # 绘图的右边界时间
 df = df.loc[df.iloc[:, 2] > now + timedelta(hours=4)]  # 删除过期事件
 df = df.loc[df.iloc[:, 1] < right_border]  # 删除未到事件
-df = df.sort_values(by=["type", "et"], ascending=False)  # 排序
+df = df.sort_values(by=["type", "et"], ascending=False)  # 以类型和end time排序
 df.to_csv(data_path, index=False)  # 覆盖保存源文件
 
 # 背景图片主要颜色提取
@@ -86,15 +86,21 @@ fig = plt.figure(figsize=(16, 9), facecolor="silver")
 ax = plt.subplot(111, frameon=False)
 
 img = image.imread(background_pic_dir)  # 读取图片
-img[:, :, :] = img[:, :, :] / 3  # 调暗
-img[:, :, -1] = 0.6  # 透明度
-
 tw = image.imread(texture_dir)  # 读取纹理
-if tw.shape[2] == 3:
-    alpha_channel = (
-        ones((tw.shape[0], tw.shape[1]), dtype=uint8) * 128
-    )  # 创建一个与原图像同样大小的alpha通道，初始值为128（半透明）
-    tw = dstack((tw, alpha_channel))  # 在第三维拼接alpha通道
+
+# 添加 Alpha 通道并修改alpha值
+def add_alpha_channel(arr,alphavalue):
+    if arr.shape[2] == 3:
+        alpha = ones((arr.shape[0], arr.shape[1]), dtype=uint8) * alphavalue
+        return dstack((arr, alpha))
+    arr[:,:,3]=alphavalue
+    return arr
+
+img = add_alpha_channel(img)
+tw = add_alpha_channel(tw)
+
+img[:, :, :-1] = img[:, :, :-1] / 3  # 调暗
+# img[:, :, 3] = 0.6*256  # 透明度
 tw[:, :, 3] = 48
 
 fig.figimage(img, 0, 0, zorder=-3)  # 显示背景
@@ -227,6 +233,3 @@ ax.spines[["right", "left"]].set_visible(False)  # 去掉左右y轴边框
 plt.tight_layout()  # 这样布局会好看一点
 
 plt.savefig(f"./粥历.png")
-plt.savefig(f"C:/Users/Zrief/Desktop/粥历.png")
-
-# plt.show()
