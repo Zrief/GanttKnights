@@ -7,6 +7,7 @@ from dateutil.parser import (
     parse,
 )  # 识别日期字符串。使得时间可以简写成 2024-11-1 16h 而非2024-11-1 16:00:00
 from numpy import sqrt, uint8, ones, dstack
+import numpy as np
 from PIL import Image as PILimage
 from glob import glob
 from random import choice
@@ -53,7 +54,7 @@ left_border = now - timedelta(days=左边界距今天)  # 绘图的左边界时�
 right_border = now + timedelta(days=右边界距本周一 - today_weekday)  # 绘图的右边界时间
 df = df.loc[df.iloc[:, 2] > now + timedelta(hours=4)]  # 删除过期事件
 df = df.loc[df.iloc[:, 1] < right_border]  # 删除未到事件
-df = df.sort_values(by=["type", "et"], ascending=False)  # 以类型和end time排序
+df = df.sort_values(by=["类型", "结束时间"], ascending=False)  # 以类型和end time排序
 df.to_csv(data_path, index=False)  # 覆盖保存源文件
 
 # 背景图片主要颜色提取
@@ -89,19 +90,32 @@ img = image.imread(background_pic_dir)  # 读取图片
 tw = image.imread(texture_dir)  # 读取纹理
 
 # 添加 Alpha 通道并修改alpha值
-def add_alpha_channel(arr,alphavalue):
-    if arr.shape[2] == 3:
-        alpha = ones((arr.shape[0], arr.shape[1]), dtype=uint8) * alphavalue
-        return dstack((arr, alpha))
-    arr[:,:,3]=alphavalue
-    return arr
+def set_alpha_channel(image_data,alphavalue):
+    if alphavalue <= 1.0:
+        alpha_val = round(alphavalue * 255)
+    else:
+        alpha_val = round(alphavalue)
+    alpha_val = max(0, min(alpha_val, 255))  # 确保值在 0-255 范围内
+    alpha_val = np.uint8(alpha_val)
+    
+    # 检查输入图像的通道数是否为 3 (RGB) 或 4 (RGBA)
+    if image_data.shape[2] not in (3, 4):
+        raise ValueError("Input image must have 3 (RGB) or 4 (RGBA) channels.")
+    # 添加或修改 Alpha 通道
+    if image_data.shape[2] == 3:
+        # 创建 Alpha 通道并合并
+        alpha = np.full((image_data.shape[0], image_data.shape[1]), alpha_val, dtype=np.uint8)
+        return np.dstack((image_data, alpha))
+    else:
+        # 复制图像数据以避免修改原始数组
+        image_data = image_data.copy()
+        image_data[:, :, 3] = alpha_val
+        return image_data
 
-img = add_alpha_channel(img)
-tw = add_alpha_channel(tw)
+img = set_alpha_channel(img,0.6)
+tw = set_alpha_channel(tw,0.2)
 
 img[:, :, :-1] = img[:, :, :-1] / 3  # 调暗
-# img[:, :, 3] = 0.6*256  # 透明度
-tw[:, :, 3] = 48
 
 fig.figimage(img, 0, 0, zorder=-3)  # 显示背景
 fig.figimage(tw, 0, 0, zorder=-2)  # 显示纹理

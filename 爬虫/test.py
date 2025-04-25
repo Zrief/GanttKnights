@@ -1,5 +1,6 @@
 import time
-import json
+import re
+import csv
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service
@@ -39,18 +40,20 @@ def get_dynamic_content(url):
         - 支持页面类型：SPA（单页应用）、CSR（客户端渲染）网页
         - 网络要求：需要允许WebSocket协议
     """
-    # 配置无界面模式
+    # 配置无界面浏览器
     edge_options = Options()
-    edge_options.add_argument("--headless=new")  # 使用Chromium 112+的无头渲染引擎
-    edge_options.add_argument("--disable-gpu")  # 禁用GPU加速防止云环境异常
-    edge_options.add_argument("--no-sandbox")  # 禁用沙盒提升容器兼容性
 
-    # 资源加载策略配置（提速40%+）
-    edge_options.page_load_strategy = "eager"  # 文档加载完成即返回，不等待子资源
+    # 核心运行模式配置
+    edge_options.add_argument("--headless=new")  # 无头模式
+    edge_options.add_argument("--disable-gpu")  # GPU加速
+    edge_options.add_argument("--no-sandbox")   # 沙盒策略
+
+    # 页面加载优化配置
+    edge_options.page_load_strategy = "eager"  # 加载策略
     prefs = {
-        "profile.managed_default_content_settings.images": 2,  # 禁止图片加载
-        "permissions.default.stylesheet": 2,  # 禁用CSS样式表
-        "profile.default_content_setting_values.javascript": 1,  # 保持JS执行
+        "profile.managed_default_content_settings.images": 2,    # 图片
+        "permissions.default.stylesheet": 2,                     # CSS
+        "profile.default_content_setting_values.javascript": 1    # JS
     }
     edge_options.add_experimental_option("prefs", prefs)
 
@@ -58,16 +61,18 @@ def get_dynamic_content(url):
     edge_options.add_argument("--disable-blink-features=AutomationControlled")
     edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 
-    # 网络协议优化配置
-    edge_options.add_argument("--disable-quic")  # 禁用QUIC协议避免协商延迟
-    edge_options.add_argument("--enable-tcp-fast-open")  # 启用TCP快速打开
-    edge_options.add_argument("--dns-prefetch-disable")  # 禁用DNS预取
+    # 网络协议优化
+    edge_options.add_argument("--disable-quic --enable-tcp-fast-open --dns-prefetch-disable")  # 合并参数
 
     # 自动管理浏览器驱动（版本兼容处理）
     service = Service(EdgeChromiumDriverManager().install())
 
     # 初始化浏览器实例
     driver = webdriver.Edge(service=service, options=edge_options)
+    # 增加JavaScript执行等待
+    WebDriverWait(driver, 15).until(
+        lambda d: d.execute_script('return document.readyState') == 'complete'
+    )
     try:
         # 设置全局超时（页面加载/元素查找）
         driver.set_page_load_timeout(20)  # 超过20秒触发TimeoutException
@@ -102,45 +107,88 @@ def get_dynamic_content(url):
         # 确保浏览器实例回收（避免内存泄漏）
         driver.quit()
 
-
 def parse_content(soup):
-    # 使用CSS属性包含选择器防御类名混淆
-    posts = soup.select('[class*="Profile__ContentStyle"]')
+    SELECTORS = {
+        'post_container': 'div[class^="PostItem__Body"]',  # 帖子容器
+        'title': 'div.title-name',  # 标题
+        'content_container': 'div[class^="PostItem__Brief-"]', # 简要内容
+        'time_span': 'span:contains("起止时间")', # 卡池的起止时间
+        'six_star_span': 'span:contains("★★★★★★")', # 六星
+    }
 
-    results = []
-    for post in posts:
-        # 使用包含关键字的属性选择器
-        title = post.select_one('[class*="title_name"]')
-        
-        # 定位包含多个span的brief容器
-        brief_container = post.select_one('[class*="PostItem_Brief"]')
-        spans = []
-        
-        if brief_container:
-            # 提取容器内的所有span元素内容
-            spans = [span.get_text(strip=True) for span in brief_container.select('span')]
+    events = []
+    # 遍历所有包含标题的容器
+    for title_container in soup.select(SELECTORS['post_container']):
+        try:
+            # 标题提取
+            title_block = title_container.select_one(SELECTORS['title'])
+            if not title_block:
+                print("警告：标题容器结构异常")
+                continue
+            title_text = title_block.get_text(strip=True)
+            
+            # 查找内容容器
+            content_block = title_container.select_one(SELECTORS['content_container'])
 
-        results.append({
-            "title": title.text.strip() if title else None,
-            "position_brief": {
-                "text": brief_container.text.strip() if brief_container else None,
-                "spans": spans  # 单独存储每个span的文本
-            }
-        })
-    return results
+            if not content_block:
+                print(f"警告：未找到关联内容区块->标题 {title_text}")
+                continue
 
+            # 时间提取（带防御性查找）
+            time_data = content_block.select_one(SELECTORS['time_span'])
+            if time_data:
+                time_match = re.search(
+                    r'(\d{1,2}月\d{1,2}日\d{2}:\d{2})\s*[～~]\s*(\d{1,2}月\d{1,2}日\d{2}:\d{2})', 
+                    time_data.text
+                )
+                start, end = time_match.groups() if time_match else ("N/A", "N/A")
+            else:
+                start = end = "N/A"
+
+            # 干员提取（改进分割逻辑）
+            six_star_data = content_block.select_one(SELECTORS['six_star_span'])
+            if six_star_data:
+                # 使用partition方法替代正则分割
+                _, _, temp = six_star_data.text.partition('：')
+                six_star = temp.split('（')[0].strip() if temp else "N/A"
+            else:
+                six_star = "N/A"
+
+            events.append({
+                'event_type': title_text,
+                'start_time': start,
+                'end_time': end,
+                'six_star': six_star.replace(" ","")
+            })
+
+        except Exception as e:
+            print(f"解析异常：{str(e)}")
+            continue
+
+
+    # 写入CSV（空数据保护）
+    if events:
+        with open('arknights_events.csv', 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=['活动类型', '开始时间', '结束时间', '六星干员'])
+            writer.writeheader()
+            writer.writerows([
+                {
+                    '活动类型': e['event_type'],
+                    '开始时间': e['start_time'],
+                    '结束时间': e['end_time'],
+                    '六星干员': e['six_star']
+                } for e in events
+            ])
+        print(f"成功写入 {len(events)} 条活动记录")
+    else:
+        print("警告：未提取到任何有效数据")
+    
+    return events
 
 # 执行示例
 if __name__ == "__main__":
     target_url = "https://www.skland.com/profile?id=7779816949641"
     soup = get_dynamic_content(target_url)
-    # print(soup)
-    with open("tmp","w",encoding="utf-8") as f:
-        json.dump(soup,f)
-
-    # with open("tmp","r",encoding="utf-8") as f:
-    #     soup = f.read()
-
     
     # 保存完整页面供分析
     with open("debug_page.html", "w", encoding="utf-8") as f:
