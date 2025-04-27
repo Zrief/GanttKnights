@@ -30,19 +30,6 @@ num_colors = 10  # 要提取的主要颜色数量
 # df = pd.read_csv(data_path)
 df = pd.read_csv(all_data_path)
 df.iloc[:, 1] = [parse(ii) for ii in df.iloc[:, 1]]  # 开始日期标准化
-# 特殊时间记法处理
-for ii in range(len(df.iloc[:, 2])):
-    if len(df.iloc[ii, 2]) <= 2:
-        if df.iloc[ii, 1].hour != 4:
-            # 结束时间特殊处理，使其始终4点结束
-            df.iloc[ii, 2] = str(
-                df.iloc[ii, 1]
-                + timedelta(days=int(df.iloc[ii, 2]))
-                - timedelta(hours=12)
-            )
-        else:
-            df.iloc[ii, 2] = str(df.iloc[ii, 1] + timedelta(days=int(df.iloc[ii, 2])))
-
 df.iloc[:, 2] = [parse(ii) for ii in df.iloc[:, 2]]  # 结束日期标准化至4点
 
 now = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
