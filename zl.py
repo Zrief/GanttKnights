@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from dateutil.parser import (
     parse,
 )  # 识别日期字符串。使得时间可以简写成 2024-11-1 16h 而非2024-11-1 16:00:00
-from numpy import sqrt, uint8, ones, dstack
 import numpy as np
 from PIL import Image as PILimage
 from glob import glob
@@ -59,9 +58,9 @@ for count, col in main_colors:
     if sum(col) > 255 * 3 * 0.382:  # 筛掉暗部
         r, g, b = col
         r, g, b = (
-            round(sqrt(r / 255) * 255),
-            round(sqrt(g / 255) * 255),
-            round(sqrt(b / 255) * 255),
+            round(np.sqrt(r / 255) * 255),
+            round(np.sqrt(g / 255) * 255),
+            round(np.sqrt(b / 255) * 255),
         )
         result = (r << 16) + (g << 8) + b
         color.append("#" + hex(result)[2:])
@@ -159,7 +158,7 @@ for ii, name in enumerate(df.iloc[:, 0]):
         )
         total_event_num += 1
 
-plt.title("近期活动一览（含*预测）", c="white")  # 标题
+plt.title("近期活动一览", c="white")  # 标题
 
 # 设置x轴刻度为日期格式
 ax.minorticks_on()  # 启用副刻度线
