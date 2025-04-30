@@ -51,7 +51,7 @@ def preprocess_data(
     df.iloc[:, 2] = [parse(ii) for ii in df.iloc[:, 2]]
     df = df.loc[df.iloc[:, 2] > now + timedelta(hours=4)]
     df = df.loc[df.iloc[:, 1] < right_border]
-    df = df.sort_values(by=["类型", "结束时间"], ascending=False)
+    df = df.sort_values(by=["类型", "结束时间","开始时间"], ascending=False)
     df.to_csv(data_path, index=False)
     return df
 
