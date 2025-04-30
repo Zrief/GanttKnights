@@ -86,10 +86,12 @@ def get_dynamic_content(url):
             )
         )
         # 模拟滚动触发动态加载
-        scroll_count = 4
+        scroll_count = 8
+        print("加载完毕，正在爬取")
         for _ in range(scroll_count):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(0.3)  # 减少滚动间隔时间
+            print(f"{_}/{scroll_count}")
+            time.sleep(0.5)  # 减少滚动间隔时间
         # 确保目标元素渲染完成
         WebDriverWait(driver, 3).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, '[class*="PostItem__"]'))
