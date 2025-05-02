@@ -39,7 +39,7 @@ def configure_edge_options():
     return edge_options
 
 
-def get_dynamic_content(url):
+def get_dynamic_content(url, core_container_selector, target_element_selector):
     """
     使用无头模式Edge浏览器获取动态渲染的网页内容，并进行性能优化和反检测处理
 
@@ -53,6 +53,8 @@ def get_dynamic_content(url):
 
     Args:
         url (str): 需要抓取的目标网页URL，必须包含协议头（http/https）
+        core_container_selector (str): 核心容器的CSS选择器
+        target_element_selector (str): 目标元素的CSS选择器
 
     Returns:
         BeautifulSoup: 解析后的HTML文档对象，可直接用于数据提取
@@ -75,14 +77,16 @@ def get_dynamic_content(url):
         driver.set_page_load_timeout(15)
         print("正在快速加载页面...")
         driver.get(url)
+
         # 等待页面完全加载
         WebDriverWait(driver, 10).until(
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
+        print(1)
         # 确保核心容器加载
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, '[class*="ProfilePostList__Wrapper"]')
+                (By.CSS_SELECTOR, core_container_selector)
             )
         )
         # 模拟滚动触发动态加载
@@ -94,9 +98,47 @@ def get_dynamic_content(url):
             time.sleep(0.5)  # 减少滚动间隔时间
         # 确保目标元素渲染完成
         WebDriverWait(driver, 3).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, '[class*="PostItem__"]'))
+            EC.presence_of_element_located((By.CSS_SELECTOR, target_element_selector))
         )
         return BeautifulSoup(driver.page_source, "html.parser")
+
+    except Exception as e:
+        print(f"加载异常: {str(e)}")
+        return None
+    finally:
+        driver.quit()
+
+
+def get_target_url_from_page(url, xpath_selector):
+    """获取最新的YJ活动预告新闻
+
+    Args:
+        url (str): 特定的网页
+        xpath_selector (str): 用于定位目标元素的XPath选择器
+
+    Returns:
+        str: 解析后的网页链接
+    """
+    edge_options = configure_edge_options()
+    service = Service(EdgeChromiumDriverManager().install())
+    driver = webdriver.Edge(service=service, options=edge_options)
+    try:
+        driver.set_page_load_timeout(15)
+        print("正在快速加载页面...")
+        driver.get(url)
+
+        # 使用传入的XPath选择器定位元素
+        element = WebDriverWait(driver, 20).until(
+            EC.element_to_be_clickable(
+                (By.XPATH, xpath_selector)
+            )
+        )
+
+        # 获取目标链接直接访问（避免点击不稳定）
+        target_url = element.get_attribute("href")
+        print("解析到目标地址:", target_url)
+        return target_url
+
     except Exception as e:
         print(f"加载异常: {str(e)}")
         return None
@@ -106,7 +148,7 @@ def get_dynamic_content(url):
 
 def parse_event(event_container, selectors):
     """
-    解析单个事件的数据
+    解析单个六星事件的数据
     """
     try:
         title_block = event_container.select_one(selectors["title"])
@@ -155,7 +197,7 @@ def parse_event(event_container, selectors):
         return None
 
 
-def parse_content(soup):
+def six_star_parse_content(soup):
     """
     解析网页内容，提取事件信息并保存到CSV文件
     """
@@ -193,17 +235,72 @@ def parse_content(soup):
         print("警告：未提取到任何有效数据")
     return events
 
+def extract_events(html_content):
+    """
+    从HTML内容中提取活动名称和时间信息
+    返回结构：[{活动名称, 开始时间, 结束时间}]
+    """
+    soup = BeautifulSoup(html_content, 'html.parser')
+    events = []
+    
+    # 遍历所有段落标签
+    for p in soup.find_all('p'):
+        text = p.get_text(strip=True)
+        
+        # 匹配活动名称模式：<strong>活动名称</strong>
+        if strong_tag := p.find('strong'):
+            event_name = strong_tag.get_text(strip=True)
+            
+            # 寻找时间信息（可能在当前段落或后续段落）
+            time_match = re.search(
+                r'(开放时间|活动时间)[：:]?\s*(\d{1,2}月\d{1,2}日 \d{2}:\d{2})\s*[～~至-]\s*(\d{1,2}月\d{1,2}日 \d{2}:\d{2})',
+                text
+            )
+            
+            # 如果当前段落没有时间信息，检查后续兄弟节点
+            if not time_match:
+                next_sib = p.find_next_sibling()
+                if next_sib and next_sib.name == 'p':
+                    time_match = re.search(
+                        r'(\d{1,2}月\d{1,2}日 \d{2}:\d{2})\s*[～~至-]\s*(\d{1,2}月\d{1,2}日 \d{2}:\d{2})',
+                        next_sib.get_text(strip=True)
+                    )
+            
+            # 提取时间信息
+            if time_match:
+                start_time = time_match.group(2) if time_match.group(2) else time_match.group(1)
+                end_time = time_match.group(3) if time_match.group(3) else time_match.group(2)
+                events.append({
+                    '活动名称': event_name,
+                    '开始时间': start_time,
+                    '结束时间': end_time
+                })
+    
+    return events
 
 if __name__ == "__main__":
-    target_url = "https://www.skland.com/profile?id=7779816949641"
-    soup = get_dynamic_content(target_url)
+    # 读取森空岛的官方，爬取近期轮换卡池信息
+    # skd_url = "https://www.skland.com/profile?id=7779816949641"
+    # core_container_selector = '[class*="ProfilePostList__Wrapper"]'
+    # target_element_selector = '[class*="PostItem__"]'
+    # soup = get_dynamic_content(skd_url, core_container_selector, target_element_selector)
+
+    # 读取鹰角官方，爬取活动卡池信息，活动信息
+    yj_url = "https://ak.hypergryph.com/news"
+    xpath_selector = '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "活动预告")]'
+    news_url = get_target_url_from_page(yj_url, xpath_selector)# 活动详情网页
+    core_container_selector = '[style*="overflow-y: scroll; margin-right: -16px;"]'
+    target_element_selector = '[style*="overflow-y: scroll; margin-right: -16px;"]'
+    # yj_url = ""
+    soup = get_dynamic_content(news_url, core_container_selector, target_element_selector)
+    
     if soup:
         # 保存完整页面供分析
         with open("debug_page.html", "w", encoding="utf-8") as f:
             f.write(soup.prettify())
-        data = parse_content(soup)
-        with open("res.dat", "w", encoding="utf-8") as f:
-            f.write(str(data))
-        print(f"获取到 {len(data)} 条内容")
+        # data = six_star_parse_content(soup)
+        # with open("res.dat", "w", encoding="utf-8") as f:
+        #     f.write(str(data))
+        # print(f"获取到 {len(data)} 条内容")
     else:
         print("未获取到网页内容，无法进行解析。")
