@@ -17,7 +17,7 @@ def get_random_paths() -> tuple[str, str, str, str]:
     返回:
     tuple[str, str, str, str]: 背景图片路径、纹理路径、所有活动数据文件路径、活动数据文件路径。
     """
-    background_list = glob(f"./粥图" + "/*")
+    background_list = glob(f"./背景图" + "/*")
     background_pic_dir = choice(background_list)
     texture_list = glob(f"./纹理" + "/*")
     texture_dir = choice(texture_list)
@@ -51,7 +51,7 @@ def preprocess_data(
     df.iloc[:, 2] = [parse(ii) for ii in df.iloc[:, 2]]
     df = df.loc[df.iloc[:, 2] > now + timedelta(hours=4)]
     df = df.loc[df.iloc[:, 1] < right_border]
-    df = df.sort_values(by=["类型", "结束时间","开始时间"], ascending=False)
+    df = df.sort_values(by=["类型", "结束时间", "开始时间"], ascending=False)
     df.to_csv(data_path, index=False)
     return df
 
@@ -70,7 +70,9 @@ def extract_main_colors(background_pic_dir: str, num_colors: int) -> list[str]:
     color = []
     pilimg = PILimage.open(background_pic_dir)
     small_image = pilimg.resize((80, 80))
-    result = small_image.convert("P", palette=PILimage.ADAPTIVE, colors=num_colors)
+    result = small_image.convert("P",
+                                 palette=PILimage.ADAPTIVE,
+                                 colors=num_colors)
     result = result.convert("RGB")
     main_colors = result.getcolors()
     col_extract = []
@@ -99,13 +101,15 @@ def set_alpha_channel(image_data: np.ndarray, alphavalue: float) -> np.ndarray:
     返回:
     np.ndarray: 带有 Alpha 通道的图像数据的 NumPy 数组。
     """
-    alpha_val = np.clip(round(alphavalue * 255) if alphavalue <= 1.0 else round(alphavalue), 0, 255).astype(np.uint8)
+    alpha_val = np.clip(
+        round(alphavalue * 255) if alphavalue <= 1.0 else round(alphavalue), 0,
+        255).astype(np.uint8)
     if image_data.shape[2] not in (3, 4):
         raise ValueError("Input image must have 3 (RGB) or 4 (RGBA) channels.")
     if image_data.shape[2] == 3:
-        alpha = np.full(
-            (image_data.shape[0], image_data.shape[1]), alpha_val, dtype=np.uint8
-        )
+        alpha = np.full((image_data.shape[0], image_data.shape[1]),
+                        alpha_val,
+                        dtype=np.uint8)
         return np.dstack((image_data, alpha))
     else:
         image_data = image_data.copy()
@@ -113,9 +117,8 @@ def set_alpha_channel(image_data: np.ndarray, alphavalue: float) -> np.ndarray:
         return image_data
 
 
-def plot_events(
-    df: pd.DataFrame, left_border: datetime, right_border: datetime, color: list[str]
-) -> None:
+def plot_events(df: pd.DataFrame, left_border: datetime,
+                right_border: datetime, color: list[str]) -> None:
     """
     绘制活动事件的条形图，并添加事件名称。
 
@@ -150,7 +153,7 @@ def plot_events(
             )
             tmp3 = (right_border - start_time).total_seconds() // 3600
             lwth = min(width, tmp3, rb)
-            namestr = name[: lwth // 8] if lwth <= 24 * 3 else name
+            namestr = name[:lwth // 8] if lwth <= 24 * 3 else name
             plt.text(
                 x=left + lwth / 2,
                 y=ii,
@@ -162,7 +165,8 @@ def plot_events(
             total_event_num += 1
 
 
-def set_x_ticks(ax: plt.Axes, left_border: datetime, right_border: datetime) -> None:
+def set_x_ticks(ax: plt.Axes, left_border: datetime,
+                right_border: datetime) -> None:
     """
     设置 x 轴的刻度和标签。
 
@@ -175,8 +179,16 @@ def set_x_ticks(ax: plt.Axes, left_border: datetime, right_border: datetime) -> 
     None
     """
     ax.minorticks_on()
-    ax.tick_params(axis="both", which="major", direction="in", width=1, length=5)
-    ax.tick_params(axis="both", which="minor", direction="in", width=1, length=2)
+    ax.tick_params(axis="both",
+                   which="major",
+                   direction="in",
+                   width=1,
+                   length=5)
+    ax.tick_params(axis="both",
+                   which="minor",
+                   direction="in",
+                   width=1,
+                   length=2)
     ax.xaxis.set_minor_locator(MultipleLocator(4))
     xticks_positions = []
     xticks_labels = []
@@ -186,16 +198,12 @@ def set_x_ticks(ax: plt.Axes, left_border: datetime, right_border: datetime) -> 
     while current_date <= right_border:
         iwn = "\n·\n" + "周" + weekname[current_date.weekday()]
         tmp = (current_date - left_border).seconds // 3600 + (
-            current_date - left_border
-        ).days * 24
+            current_date - left_border).days * 24
         if tmp == 0:
-            if (
-                current_date.day + 3 + 22 - current_date.weekday()
-                < (
-                    current_date.replace(month=(current_date.month + 1) % 12, day=1)
-                    - timedelta(days=1)
-                ).day
-            ):
+            if (current_date.day + 3 + 22 - current_date.weekday()
+                    < (current_date.replace(
+                        month=(current_date.month + 1) % 12, day=1) -
+                       timedelta(days=1)).day):
                 xticks_labels.append(current_date.strftime(f"%m月{iwn}"))
             else:
                 xticks_labels.append(current_date.strftime(f"%d{iwn}"))
@@ -213,12 +221,14 @@ def set_x_ticks(ax: plt.Axes, left_border: datetime, right_border: datetime) -> 
 
 def main() -> None:
     num_colors = 10
-    background_pic_dir, texture_dir, all_data_path, data_path = get_random_paths()
+    background_pic_dir, texture_dir, all_data_path, data_path = get_random_paths(
+    )
     now = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_weekday = now.weekday()
     left_border = now - timedelta(days=3)
     right_border = now + timedelta(days=22 - today_weekday)
-    df = preprocess_data(data_path, all_data_path, now, left_border, right_border)
+    df = preprocess_data(data_path, all_data_path, now, left_border,
+                         right_border)
     color = extract_main_colors(background_pic_dir, num_colors)
     plt.rcParams["font.sans-serif"] = ["SimHei"]
     plt.rcParams["font.size"] = 16
@@ -260,7 +270,7 @@ def main() -> None:
     plt.ylim(-0.5, df.shape[0] - 0.5)
     ax.spines[["right", "left"]].set_visible(False)
     plt.tight_layout()
-    plt.savefig(f"./粥历.png")
+    plt.savefig(f"./Gantt.png")
 
 
 if __name__ == "__main__":

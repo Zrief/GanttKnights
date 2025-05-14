@@ -10,6 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
 
+
 def get_target_url_from_page(url, xpath_selector):
     """获取最新的YJ活动预告新闻
 
@@ -30,10 +31,7 @@ def get_target_url_from_page(url, xpath_selector):
 
         # 使用传入的XPath选择器定位元素
         element = WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable(
-                (By.XPATH, xpath_selector)
-            )
-        )
+            EC.element_to_be_clickable((By.XPATH, xpath_selector)))
 
         # 获取目标链接直接访问（避免点击不稳定）
         target_url = element.get_attribute("href")
@@ -45,6 +43,8 @@ def get_target_url_from_page(url, xpath_selector):
         return None
     finally:
         driver.quit()
+
+
 def configure_edge_options():
     """
     配置Edge浏览器选项，包含无头模式、性能优化、反检测等设置
@@ -66,11 +66,13 @@ def configure_edge_options():
     edge_options.add_experimental_option("prefs", prefs)
     # 反自动化检测配置
     edge_options.add_argument("--disable-blink-features=AutomationControlled")
-    edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    edge_options.add_experimental_option("excludeSwitches",
+                                         ["enable-automation"])
     # 网络协议优化
     edge_options.add_argument("--enable-tcp-fast-open --dns-prefetch-disable")
     edge_options.add_argument("--log-level=3")  # 设置日志级别为FATAL，消除不必要的警告
     return edge_options
+
 
 def get_dynamic_content(url, core_container_selector, target_element_selector):
     """
@@ -112,27 +114,25 @@ def get_dynamic_content(url, core_container_selector, target_element_selector):
         driver.get(url)
 
         # 等待页面完全加载
-        WebDriverWait(driver, 10).until(
-            lambda d: d.execute_script("return document.readyState") == "complete"
-        )
+        WebDriverWait(driver, 10).until(lambda d: d.execute_script(
+            "return document.readyState") == "complete")
         print(1)
         # 确保核心容器加载
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, core_container_selector)
-            )
-        )
+                (By.CSS_SELECTOR, core_container_selector)))
         # 模拟滚动触发动态加载
         scroll_count = 8
         print("加载完毕，正在爬取")
         for _ in range(scroll_count):
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            driver.execute_script(
+                "window.scrollTo(0, document.body.scrollHeight);")
             print(f"{_}/{scroll_count}")
             time.sleep(0.5)  # 减少滚动间隔时间
         # 确保目标元素渲染完成
         WebDriverWait(driver, 3).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, target_element_selector))
-        )
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, target_element_selector)))
         return BeautifulSoup(driver.page_source, "html.parser")
 
     except Exception as e:
@@ -141,12 +141,15 @@ def get_dynamic_content(url, core_container_selector, target_element_selector):
     finally:
         driver.quit()
 
+
 def css_selector_version(html):
     soup = BeautifulSoup(html, 'html.parser')
-    return soup.select('div[style*="overflow-y:scroll"][style*="margin-right:-16px"]')
+    return soup.select(
+        'div[style*="overflow-y:scroll"][style*="margin-right:-16px"]')
+
 
 if __name__ == "__main__":
-# 读取鹰角官方，爬取活动卡池信息，活动信息
+    # 读取鹰角官方，爬取活动卡池信息，活动信息
     # yj_url = "https://ak.hypergryph.com/news"
     # xpath_selector = '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "活动预告")]'
     # news_url = get_target_url_from_page(yj_url, xpath_selector)# 活动详情网页
@@ -157,8 +160,5 @@ if __name__ == "__main__":
     with open("debug_page.html", "r", encoding="utf-8") as f:
         soup = f.read()
         theme_res = css_selector_version(soup)
-        with open("theme.html","w",encoding="utf-8") as f:
+        with open("theme.html", "w", encoding="utf-8") as f:
             f.write(theme_res.prettify())
-    
-
-        

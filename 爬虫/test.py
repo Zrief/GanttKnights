@@ -32,7 +32,8 @@ def configure_edge_options():
     edge_options.add_experimental_option("prefs", prefs)
     # 反自动化检测配置
     edge_options.add_argument("--disable-blink-features=AutomationControlled")
-    edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    edge_options.add_experimental_option("excludeSwitches",
+                                         ["enable-automation"])
     # 网络协议优化
     edge_options.add_argument("--enable-tcp-fast-open --dns-prefetch-disable")
     edge_options.add_argument("--log-level=3")  # 设置日志级别为FATAL，消除不必要的警告
@@ -79,27 +80,25 @@ def get_dynamic_content(url, core_container_selector, target_element_selector):
         driver.get(url)
 
         # 等待页面完全加载
-        WebDriverWait(driver, 10).until(
-            lambda d: d.execute_script("return document.readyState") == "complete"
-        )
+        WebDriverWait(driver, 10).until(lambda d: d.execute_script(
+            "return document.readyState") == "complete")
         print(1)
         # 确保核心容器加载
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, core_container_selector)
-            )
-        )
+                (By.CSS_SELECTOR, core_container_selector)))
         # 模拟滚动触发动态加载
         scroll_count = 8
         print("加载完毕，正在爬取")
         for _ in range(scroll_count):
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            driver.execute_script(
+                "window.scrollTo(0, document.body.scrollHeight);")
             print(f"{_}/{scroll_count}")
             time.sleep(0.5)  # 减少滚动间隔时间
         # 确保目标元素渲染完成
         WebDriverWait(driver, 3).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, target_element_selector))
-        )
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, target_element_selector)))
         return BeautifulSoup(driver.page_source, "html.parser")
 
     except Exception as e:
@@ -129,10 +128,7 @@ def get_target_url_from_page(url, xpath_selector):
 
         # 使用传入的XPath选择器定位元素
         element = WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable(
-                (By.XPATH, xpath_selector)
-            )
-        )
+            EC.element_to_be_clickable((By.XPATH, xpath_selector)))
 
         # 获取目标链接直接访问（避免点击不稳定）
         target_url = element.get_attribute("href")
@@ -156,7 +152,8 @@ def parse_event(event_container, selectors):
             print("警告：标题容器结构异常")
             return None
         title_text = title_block.get_text(strip=True)
-        content_block = event_container.select_one(selectors["content_container"])
+        content_block = event_container.select_one(
+            selectors["content_container"])
         if not content_block:
             print(f"警告：未找到关联内容区块->标题 {title_text}")
             return None
@@ -164,8 +161,8 @@ def parse_event(event_container, selectors):
         time_data = None
         for span in content_block.find_all("span"):
             if re.search(
-                r"(\d{1,2}月\d{1,2}日\s*\d{2}:\d{2})\s*[～~-]\s*(\d{1,2}月\d{1,2}日\s*\d{2}:\d{2})",
-                span.text,
+                    r"(\d{1,2}月\d{1,2}日\s*\d{2}:\d{2})\s*[～~-]\s*(\d{1,2}月\d{1,2}日\s*\d{2}:\d{2})",
+                    span.text,
             ):
                 time_data = span
                 break
@@ -208,32 +205,29 @@ def six_star_parse_content(soup):
         "six_star_span": 'span:-soup-contains("★★★★★★")',
     }
     events = [
-        event
-        for event_container in soup.select(selectors["post_container"])
+        event for event_container in soup.select(selectors["post_container"])
         if (event := parse_event(event_container, selectors))
     ]
 
     if events:
-        with open("arknights_events.csv", "w", newline="", encoding="utf-8-sig") as f:
+        with open("arknights_events.csv",
+                  "w",
+                  newline="",
+                  encoding="utf-8-sig") as f:
             writer = csv.DictWriter(
-                f, fieldnames=["活动类型", "开始时间", "结束时间", "六星干员"]
-            )
+                f, fieldnames=["活动类型", "开始时间", "结束时间", "六星干员"])
             writer.writeheader()
-            writer.writerows(
-                [
-                    {
-                        "活动类型": e["event_type"],
-                        "开始时间": e["start_time"],
-                        "结束时间": e["end_time"],
-                        "六星干员": e["six_star"],
-                    }
-                    for e in events
-                ]
-            )
+            writer.writerows([{
+                "活动类型": e["event_type"],
+                "开始时间": e["start_time"],
+                "结束时间": e["end_time"],
+                "六星干员": e["six_star"],
+            } for e in events])
         print(f"成功写入 {len(events)} 条活动记录")
     else:
         print("警告：未提取到任何有效数据")
     return events
+
 
 def extract_events(html_content):
     """
@@ -242,63 +236,66 @@ def extract_events(html_content):
     """
     soup = BeautifulSoup(html_content, 'html.parser')
     events = []
-    
+
     # 遍历所有段落标签
     for p in soup.find_all('p'):
         text = p.get_text(strip=True)
-        
+
         # 匹配活动名称模式：<strong>活动名称</strong>
         if strong_tag := p.find('strong'):
             event_name = strong_tag.get_text(strip=True)
-            
+
             # 寻找时间信息（可能在当前段落或后续段落）
             time_match = re.search(
                 r'(开放时间|活动时间)[：:]?\s*(\d{1,2}月\d{1,2}日 \d{2}:\d{2})\s*[～~至-]\s*(\d{1,2}月\d{1,2}日 \d{2}:\d{2})',
-                text
-            )
-            
+                text)
+
             # 如果当前段落没有时间信息，检查后续兄弟节点
             if not time_match:
                 next_sib = p.find_next_sibling()
                 if next_sib and next_sib.name == 'p':
                     time_match = re.search(
                         r'(\d{1,2}月\d{1,2}日 \d{2}:\d{2})\s*[～~至-]\s*(\d{1,2}月\d{1,2}日 \d{2}:\d{2})',
-                        next_sib.get_text(strip=True)
-                    )
-            
+                        next_sib.get_text(strip=True))
+
             # 提取时间信息
             if time_match:
-                start_time = time_match.group(2) if time_match.group(2) else time_match.group(1)
-                end_time = time_match.group(3) if time_match.group(3) else time_match.group(2)
+                start_time = time_match.group(2) if time_match.group(
+                    2) else time_match.group(1)
+                end_time = time_match.group(3) if time_match.group(
+                    3) else time_match.group(2)
                 events.append({
                     '活动名称': event_name,
                     '开始时间': start_time,
                     '结束时间': end_time
                 })
-    
+
     return events
+
 
 if __name__ == "__main__":
     # 读取森空岛的官方，爬取近期轮换卡池信息
-    # skd_url = "https://www.skland.com/profile?id=7779816949641"
-    # core_container_selector = '[class*="ProfilePostList__Wrapper"]'
-    # target_element_selector = '[class*="PostItem__"]'
-    # soup = get_dynamic_content(skd_url, core_container_selector, target_element_selector)
+    skd_url = "https://www.skland.com/profile?id=7779816949641"
+    core_container_selector = '[class*="ProfilePostList__Wrapper"]'
+    target_element_selector = '[class*="PostItem__"]'
+    soup = get_dynamic_content(skd_url, core_container_selector,
+                               target_element_selector)
 
     # 读取鹰角官方，爬取活动卡池信息，活动信息
-    yj_url = "https://ak.hypergryph.com/news"
-    xpath_selector = '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "活动预告")]'
-    news_url = get_target_url_from_page(yj_url, xpath_selector)# 活动详情网页
-    core_container_selector = '[style*="overflow-y: scroll; margin-right: -16px;"]'
-    target_element_selector = '[style*="overflow-y: scroll; margin-right: -16px;"]'
-    # yj_url = ""
-    soup = get_dynamic_content(news_url, core_container_selector, target_element_selector)
-    
+    # yj_url = "https://ak.hypergryph.com/news"
+    # xpath_selector = '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "活动预告")]'
+    # news_url = get_target_url_from_page(yj_url, xpath_selector)  # 活动详情网页
+    # core_container_selector = '[style*="overflow-y: scroll; margin-right: -16px;"]'
+    # target_element_selector = '[style*="overflow-y: scroll; margin-right: -16px;"]'
+    # # yj_url = ""
+    # soup = get_dynamic_content(news_url, core_container_selector,
+    #                            target_element_selector)
+
     if soup:
         # 保存完整页面供分析
         with open("debug_page.html", "w", encoding="utf-8") as f:
             f.write(soup.prettify())
-        # data = six_star_parse_content(soup)
+        data = six_star_parse_content(soup)
         # with open("res.dat", "w", encoding="utf-8") as f:
         #     f.write(str(data))
         # print(f"获取到 {len(data)} 条内容")
