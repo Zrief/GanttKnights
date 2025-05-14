@@ -2,7 +2,7 @@
 针对游戏明日方舟特化的甘特图绘图工具，基于matplotlib | A Gantt chart plotting tool specialized for the mobile game "Arknights", developed using matplotlib.
 
 效果展示
-![效果展示](./粥历.png)
+![效果展示](./Gantt.png)
 
 ## todo
 - [ ] 自动爬取官方信息
