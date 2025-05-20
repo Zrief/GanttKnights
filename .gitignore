@@ -3,3 +3,5 @@ res.dat
 tmp
 所有活动数据 copy.csv
 /.vscode
+/.venv
+.python-version

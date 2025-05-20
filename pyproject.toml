@@ -1,0 +1,14 @@
+[project]
+name = "ganttknights"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "bs4>=0.0.2",
+    "matplotlib>=3.10.3",
+    "pandas>=2.2.3",
+    "selenium>=4.32.0",
+    "tqdm>=4.67.1",
+    "webdriver-manager>=4.0.2",
+]
