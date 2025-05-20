@@ -9,6 +9,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
+from tqdm import tqdm
 
 
 class BrowserManager:
@@ -105,10 +106,9 @@ class BrowserManager:
 
             # 模拟滚动触发动态加载
             print("加载完毕，正在爬取")
-            for i in range(scroll_count):
+            for i in tqdm(range(scroll_count),desc="滚动加载中..."):
                 self.driver.execute_script(
                     "window.scrollTo(0, document.body.scrollHeight);")
-                print(f"{i+1}/{scroll_count}")
                 time.sleep(0.5)  # 减少滚动间隔时间
 
             # 确保目标元素渲染完成
@@ -162,7 +162,7 @@ class BrowserManager:
             print("浏览器已关闭")
 
 
-def parse_event_container(title_text, content_text):
+def parse_event_container(title_text, content_text, title_specail_list=None):
     """
     解析单条活动的数据
     """
@@ -182,6 +182,14 @@ def parse_event_container(title_text, content_text):
         else:
             six_star = "N/A"
 
+        if not title_specail_list:
+            title_specail_list = ["中坚甄选", "定向甄选"]
+        matched_title = [
+            title for title in title_specail_list if title in title_text
+        ]
+        if matched_title:
+            six_star = "！"
+
         return {
             "event_type": title_text,
             "start_time": start,
@@ -195,7 +203,7 @@ def parse_event_container(title_text, content_text):
 
 def parse_six_star_events(soup):
     """
-    解析网页内容，提取六星活动信息并保存到CSV文件
+    解析森空岛网页内容，提取活动信息并保存到CSV文件
     """
     selectors = {
         "title": "div.title-name",

@@ -274,4 +274,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import os
+
+    # os.system(r"python ./爬虫/test2.py")
+    os.system(r"python ./爬虫/six2csv.py")
     main()

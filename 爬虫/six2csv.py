@@ -33,7 +33,6 @@ def filter_non_null_stars(df):
     过滤掉六星干员列为空的数据
     """
     return df[~df["六星干员"].isnull()]
-    
 
 
 def process_date_columns(df):
@@ -51,21 +50,23 @@ def process_name_column(df):
     重命名活动类型列为名称列
     添加类型列并删除六星干员列
     """
+    # ["中坚甄选", "定向甄选"]
     df.iloc[:, 0] = (
         df.iloc[:, 0]
         .str.replace("常驻标准寻访", "【标准池】")
         .str.replace("中坚寻访", "【中坚池】")
     )
-    mask = df.iloc[:, 0].str.contains('限定寻访·庆典')
-    df.loc[mask, df.columns[0]] = '【限定池】'
+    mask = df.iloc[:, 0].str.contains("限定寻访·庆典")
+    df.loc[mask, df.columns[0]] = "【限定池】"
 
-    df.iloc[:, 0] = df.iloc[:, 0] + df.iloc[:, 3].str.replace("[限定]","")
+    df.iloc[:, 0] = df.iloc[:, 0] + df.iloc[:, 3].str.replace("[限定]", "")
 
     df.rename(columns={"活动类型": "名称"}, inplace=True)
-    
+
     df["类型"] = 0
     df = df.drop("六星干员", axis=1)
     return df
+
 
 def merge_dataframes(df1, df2):
     """
@@ -75,9 +76,10 @@ def merge_dataframes(df1, df2):
     df = pd.concat([df1, df2], axis=0, ignore_index=True)
     df = df.convert_dtypes()
     df = df.drop_duplicates(df.columns[0])
-    df['开始时间'] = pd.to_datetime(df['开始时间'], errors='coerce')
+    df["开始时间"] = pd.to_datetime(df["开始时间"], errors="coerce")
     df = df.sort_values(by="开始时间", ascending=True)
     return df
+
 
 def save_data(df, file_path):
     """
@@ -93,7 +95,7 @@ def process_data(skdpath: str = "arknights_events.csv", oppath: str = "爬虫/�
     """
     主处理函数，调用其他函数完成数据处理流程
     """
-    
+
     df = read_data(skdpath)
     if df is None:
         return
@@ -109,12 +111,11 @@ def process_data(skdpath: str = "arknights_events.csv", oppath: str = "爬虫/�
     df = merge_dataframes(df2, df)
 
     save_data(df, oppath)
-    
+
     final_path = ".\所有活动数据.csv"
-    save_data(merge_dataframes(read_data(final_path),df),final_path)
+    save_data(merge_dataframes(read_data(final_path), df), final_path)
     return df
 
 
 if __name__ == "__main__":
     process_data()
-    
