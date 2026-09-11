@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -9,18 +11,18 @@ from random import choice
 import matplotlib.pyplot as plt
 
 from src.config import settings, setup_logging
-from src.获取_prts import 获取事件列表
+from src.获取_prts import 获取事件列表, 获取首页, 下载图片
 from src.解析_API活动 import API转活动列表
+from src.解析_首页 import 解析新增内容
 from src.汇总_活动 import (
     合并商店,
-    合并长期活动,
     去重排序,
     合并保存CSV,
 )
 from src.筛选_活动 import preprocess_data
 from src.绘图_图表 import plot_events, set_x_ticks, 创建画布
 from src.绘图_颜色 import extract_main_colors
-from src.解析_卡池 import 抓取卡池一览, 合并卡池CSV
+from src.解析_卡池 import 抓取卡池一览
 
 logger = logging.getLogger("ganttknights")
 
@@ -40,6 +42,52 @@ def 随机路径() -> tuple[str, str]:
     return str(choice(bg列表)), str(choice(tx列表))
 
 
+def 更新增预告() -> dict:
+    """抓首页新增时装/模组，图标缓存到 数据/图片缓存/，写 新增预告.json"""
+    首页 = 获取首页()
+    if 首页 is None:
+        logger.warning("首页获取失败，跳过新增预告")
+        return {}
+    新增 = 解析新增内容(首页)
+    if not any(新增.values()):
+        logger.warning("首页未解析到新增时装/模组")
+        return 新增
+
+    缓存目录 = Path(settings.icon_cache_dir)
+    缓存目录.mkdir(parents=True, exist_ok=True)
+    for 条目们 in 新增.values():
+        for 条目 in 条目们:
+            目标 = 缓存目录 / 条目["图标文件名"]
+            if 下载图片(条目["图标"], 目标):
+                条目["图标文件"] = str(目标)
+
+    Path(settings.new_items_path).write_text(
+        json.dumps(新增, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    logger.info(
+        "新增预告: 时装 %d / 模组 %d，图标缓存于 %s",
+        len(新增["时装"]), len(新增["模组"]), 缓存目录,
+    )
+    return 新增
+
+
+def 读取已解析来源() -> set[str]:
+    """从 store 读出公告解析成功过的活动名，用于跳过重复解析"""
+    来源: set[str] = set()
+    路径 = Path(settings.all_data_path)
+    if not 路径.exists():
+        return 来源
+    try:
+        with open(路径, newline="", encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                值 = (row.get("来源") or "").strip()
+                if 值:
+                    来源.add(值)
+    except Exception:
+        logger.exception("读取已解析来源失败")
+    return 来源
+
+
 def 更新数据() -> None:
     """第 1 步：爬取 + 解析 + 合并 + 保存"""
     try:
@@ -51,22 +99,26 @@ def 更新数据() -> None:
         logger.warning("API 未返回数据")
         return
 
-    活动列表 = API转活动列表(api原始, 现在字符串)
+    活动列表 = API转活动列表(api原始, 现在字符串, 读取已解析来源())
 
-    活动列表 = 合并长期活动(活动列表, settings.long_term_path, 现在字符串)
     活动列表 = 合并商店(活动列表)
 
     # 卡池数据
     try:
         活动列表.extend(抓取卡池一览())
-        活动列表 = 合并卡池CSV(活动列表, settings.pool_path, 现在字符串)
     except Exception:
         logger.exception("获取卡池数据失败")
+
+    # 首页新增时装/模组（图标缓存到本地）
+    try:
+        更新增预告()
+    except Exception:
+        logger.exception("新增预告获取失败")
 
     活动列表 = 去重排序(活动列表)
 
     if 活动列表:
-        合并保存CSV(活动列表, settings.all_data_path)
+        合并保存CSV(活动列表, settings.all_data_path, 现在字符串)
         logger.info("数据更新完成，共 %d 条活动", len(活动列表))
     else:
         logger.warning("未获取到有效活动")
@@ -91,7 +143,6 @@ def main(force: bool = False):
 
     df = preprocess_data(
         all_data_path=settings.all_data_path,
-        data_path=settings.data_path,
         now=今天,
         left_border=左边界,
         right_border=右边界,
@@ -126,7 +177,10 @@ def main(force: bool = False):
     # 第 5 步：生成过期警告输出
     from src.生成_警告 import 生成警告
     try:
-        警告 = 生成警告(df, 提醒天数=3)
+        新增内容 = {}
+        if Path(settings.new_items_path).exists():
+            新增内容 = json.loads(Path(settings.new_items_path).read_text(encoding="utf-8"))
+        警告 = 生成警告(df, 提醒天数=3, 新增内容=新增内容)
         if 警告:
             print("\n" + "=" * 54)
             print(警告)

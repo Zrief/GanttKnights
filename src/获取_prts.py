@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import httpx
 
 logger = logging.getLogger("src.网络")
 
 PRTS_API = "https://prts.wiki/api.php"
+PRTS_HOME = "https://prts.wiki/"
 
 CLIENT = httpx.Client(timeout=30, follow_redirects=True)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -94,3 +96,24 @@ def 获取公告wikitext(事件名: str) -> str | None:
     字段 = 数据.get("parse", {}).get("wikitext", {})
     wikitext = 字段.get("*", "") if isinstance(字段, dict) else str(字段)
     return wikitext or None
+
+
+def 获取首页() -> str | None:
+    """获取首页渲染后的 HTML（亮点干员板块是动态生成的，wikitext 里没有）"""
+    resp = 请求(PRTS_HOME)
+    if resp is None:
+        return None
+    return resp.text
+
+
+def 下载图片(url: str, 目标路径: str | Path) -> bool:
+    """下载图片到本地，目标文件已存在（缓存命中）则跳过下载"""
+    目标 = Path(目标路径)
+    if 目标.exists() and 目标.stat().st_size > 0:
+        return True
+    resp = 请求(url)
+    if resp is None:
+        return False
+    目标.write_bytes(resp.content)
+    logger.info("  已缓存图片: %s", 目标.name)
+    return True

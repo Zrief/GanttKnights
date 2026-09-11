@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 def preprocess_data(
-    data_path: str | None = None,
     all_data_path: str | None = None,
     *,
     now: datetime | None = None,
@@ -19,7 +18,6 @@ def preprocess_data(
     right_border: datetime | None = None,
 ) -> pd.DataFrame:
     all_data_path = all_data_path or settings.all_data_path
-    data_path = data_path or settings.data_path
     now = now or datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     left_border = left_border or now - timedelta(days=settings.left_offset_days)
     right_border = right_border or now + timedelta(
@@ -57,11 +55,6 @@ def preprocess_data(
         by=[col_type, col_end, col_start], ascending=False
     )
     df = df[df[col_type] != -1]
-
-    try:
-        df.to_csv(data_path, index=False)
-    except Exception:
-        logger.exception("保存过滤后数据失败: %s", data_path)
 
     if df.empty:
         logger.warning(

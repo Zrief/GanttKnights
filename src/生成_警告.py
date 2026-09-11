@@ -16,6 +16,7 @@ def 生成警告(
     df: pd.DataFrame,
     提醒天数: int = 3,
     紧急天数: int = 1,
+    新增内容: dict | None = None,
 ) -> str:
     """生成过期警告文本。
 
@@ -23,12 +24,15 @@ def 生成警告(
         df: 经过 preprocess_data 过滤后的活动 DataFrame
         提醒天数: 多少天内过期就提醒
         紧急天数: 当天内过期标为紧急
+        新增内容: 首页解析出的新增时装/模组（{"时装": [...], "模组": [...]}）
 
     返回:
-        格式化的警告文本，无警告时返回空字符串
+        格式化的警告文本，无内容时返回空字符串
     """
+    段 = _新增段落(新增内容 or {})
+
     if df.empty:
-        return ""
+        return "\n".join(段)
 
     now = datetime.now()
     now_date = now.date()
@@ -41,13 +45,10 @@ def 生成警告(
 
     mask = (df[col_end] > now) & (df[col_end] <= 截止日期)
     警告df = df[mask].copy()
-    if 警告df.empty:
-        return ""
 
     # 按结束时间排序（最紧急的在前）
     警告df = 警告df.sort_values(by=col_end)
 
-    行们: list[str] = []
     紧急行: list[str] = []
     普通行: list[str] = []
 
@@ -78,7 +79,6 @@ def 生成警告(
             普通行.append(行)
 
     # 组装
-    段 = []
     有紧急 = bool(紧急行)
     有普通 = bool(普通行)
     if 有紧急:
@@ -88,8 +88,25 @@ def 生成警告(
         header = "📋 还有这些即将到期" if 有紧急 else "📋 博士，以下行动即将到期"
         段.append(f"\n{header}（{提醒天数}天内）")
         段.extend(普通行)
+    if 有紧急 or 有普通:
+        段.append(f"\n⏰ 共 {len(警告df)} 项行动即将到期，博士请留意。")
 
-    count = len(警告df)
-    tail = f"\n⏰ 共 {count} 项行动即将到期，博士请留意。"
-    段.append(tail)
     return "\n".join(段)
+
+
+def _新增段落(新增内容: dict) -> list[str]:
+    """把首页新增时装/模组拼成提醒段落，无内容返回空列表"""
+    时装 = 新增内容.get("时装") or []
+    模组 = 新增内容.get("模组") or []
+    if not 时装 and not 模组:
+        return []
+
+    段 = ["✨ 罗德岛上新——"]
+    if 时装:
+        段.append("  👗 新增时装：" + "、".join(i["干员"] for i in 时装))
+    if 模组:
+        名单 = "、".join(
+            f"{i['干员']}「{i['名称']}」" if i.get("名称") else i["干员"] for i in 模组
+        )
+        段.append("  🔩 新增模组：" + 名单)
+    return 段

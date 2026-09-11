@@ -6,14 +6,11 @@ import logging
 import sys
 from datetime import datetime
 
-from src.config import settings
 from src.获取_prts import 获取事件列表
 from src.解析_API活动 import API转活动列表
 from src.汇总_活动 import (
     合并商店,
-    合并长期活动,
     去重排序,
-    保存CSV,
 )
 
 logger = logging.getLogger("prts_scraper")
@@ -30,7 +27,6 @@ def 爬取(限制: int = 10) -> list[dict]:
         return []
 
     活动列表 = API转活动列表(api原始, 现在字符串)
-    活动列表 = 合并长期活动(活动列表, settings.long_term_path, 现在字符串)
     活动列表 = 合并商店(活动列表)
     活动列表 = 去重排序(活动列表)
     return 活动列表
@@ -54,7 +50,6 @@ def main():
         logger.warning("未获取到活动数据")
         sys.exit(1)
 
-    保存CSV(activities, settings.prts_csv_path)
     print()
     类型名 = {0: "卡池", 1: "活动", 2: "福利", -1: "商店", 99: "长期"}
     for e in activities:

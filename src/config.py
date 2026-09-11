@@ -12,10 +12,8 @@ class Settings:
     bg_dir: str = str(ROOT_DIR / "背景图")
     texture_dir: str = str(ROOT_DIR / "纹理")
     all_data_path: str = str(ROOT_DIR / "数据" / "所有活动数据.csv")
-    data_path: str = str(ROOT_DIR / "数据" / "活动数据.csv")
-    prts_csv_path: str = str(ROOT_DIR / "数据" / "prts_events.csv")
-    long_term_path: str = str(ROOT_DIR / "数据" / "长期活动.csv")
-    pool_path: str = str(ROOT_DIR / "数据" / "卡池.csv")
+    new_items_path: str = str(ROOT_DIR / "数据" / "新增预告.json")
+    icon_cache_dir: str = str(ROOT_DIR / "数据" / "图片缓存")
     warning_path: str = str(ROOT_DIR / "数据" / "警告.txt")
     output_path: str = str(ROOT_DIR / "Gantt.jpg")
 

@@ -65,12 +65,15 @@ def 提取API时间(属性: dict, 键: str) -> str | None:
     return 解析API时间戳(值[0]) if 值 else None
 
 
-def API转活动列表(api原始: list[dict], 现在时间: str) -> list[dict]:
+def API转活动列表(api原始: list[dict], 现在时间: str, 已解析来源: set[str] | None = None) -> list[dict]:
     """SMW ask 结果 → 活动条目列表
 
     开始时间优先取 活动开始时间cn（国服实际开跑时刻；无 cn 后缀的主属性
-    记的是 4:00 日切时间），有公告页的活动拆成子活动，没有的用 API 时间。
+    记的是 4:00 日切时间）。公告解析成功过的活动（来源在 已解析来源 里）
+    直接跳过——公告里的剿灭/保全等长期条目已增量存在 store 里，无需重复
+    抓取。解析失败回退 API 时间的条目不记来源，下次运行会重试公告。
     """
+    已解析来源 = 已解析来源 or set()
     活动列表: list[dict] = []
     for idx, (事件名, 条目) in enumerate(api原始):
         属性 = 条目.get("printouts", {})
@@ -88,9 +91,13 @@ def API转活动列表(api原始: list[dict], 现在时间: str) -> list[dict]:
         elif api类型 == "合作活动":
             显示名 = f"【联动】{事件名}"
 
+        if 显示名 in 已解析来源:
+            logger.info("  [%d] %s 公告已解析过，跳过", idx + 1, 显示名)
+            continue
+
         公告 = 获取公告wikitext(事件名)
         if 公告 is None:
-            活动列表.append({"名称": 显示名, "开始时间": 开始, "结束时间": 结束, "类型": 类型, "_parent": 显示名})
+            活动列表.append({"名称": 显示名, "开始时间": 开始, "结束时间": 结束, "类型": 类型, "_parent": ""})
             logger.info("  [%d] %s → API 时间（%s）", idx + 1, 显示名, 类型)
             continue
 
@@ -100,8 +107,8 @@ def API转活动列表(api原始: list[dict], 现在时间: str) -> list[dict]:
             logger.info("  [%d] %s → %d 条子活动", idx + 1, 事件名, len(子活动))
         else:
             # 公告页存在但没解析到子活动（页面结构特殊），回退 API 时间，
-            # 避免整个活动从图表上消失
-            活动列表.append({"名称": 显示名, "开始时间": 开始, "结束时间": 结束, "类型": 类型, "_parent": 显示名})
+            # 不记来源，下次运行会重试
+            活动列表.append({"名称": 显示名, "开始时间": 开始, "结束时间": 结束, "类型": 类型, "_parent": ""})
             logger.info("  [%d] %s 公告页无子活动，回退 API 时间（%s）", idx + 1, 显示名, 类型)
 
     return 活动列表

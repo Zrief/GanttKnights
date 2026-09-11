@@ -8,10 +8,8 @@
 
 from __future__ import annotations
 
-import csv
 import logging
 import re
-from pathlib import Path
 
 from src.获取_prts import PRTS_API, 请求
 
@@ -171,32 +169,3 @@ def _卡池名称(前缀: str, 带序号: bool, 序号: str, 名单元格: str) 
         名称 = (m.group(2) or 目标).strip().removeprefix("寻访模拟/")
         return f"{前缀}{re.sub(r'^【[^】]*】', '', 名称).strip()}"
     return ""
-
-
-def 合并卡池CSV(卡池列表: list[dict], 文件路径: str | Path, 现在时间: str) -> list[dict]:
-    """从 卡池.csv 合并未结束的标准/中坚寻访"""
-    路径 = Path(文件路径)
-    if not 路径.exists():
-        return 卡池列表
-
-    try:
-        with open(路径, newline="", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            已有名称 = {a["名称"] for a in 卡池列表}
-            for row in reader:
-                名称 = row.get("名称", "").strip()
-                if not 名称 or 名称 in 已有名称:
-                    continue
-                if row.get("结束时间", "") >= 现在时间:
-                    卡池列表.append({
-                        "名称": 名称,
-                        "开始时间": row["开始时间"],
-                        "结束时间": row["结束时间"],
-                        "类型": 0,
-                        "_parent": "",
-                    })
-                    已有名称.add(名称)
-            logger.info("  合并卡池CSV: %s", 路径.name)
-    except Exception:
-        logger.exception("读取卡池文件失败: %s", 路径)
-    return 卡池列表
