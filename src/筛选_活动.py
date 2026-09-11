@@ -4,7 +4,6 @@ import logging
 from datetime import datetime, timedelta
 
 import pandas as pd
-from dateutil.parser import parse
 
 from src.config import settings
 
@@ -40,16 +39,17 @@ def preprocess_data(
         logger.warning("数据文件为空: %s", all_data_path)
         return df
 
-    col_name = df.columns[0]
     col_start = df.columns[1]
     col_end = df.columns[2]
     col_type = df.columns[3]
 
-    try:
-        df[col_start] = [parse(str(ii)) for ii in df[col_start]]
-        df[col_end] = [parse(str(ii)) for ii in df[col_end]]
-    except Exception:
-        logger.exception("日期解析失败")
+    # 无法解析的行丢弃而不是让整个流程崩溃
+    df[col_start] = pd.to_datetime(df[col_start], errors="coerce")
+    df[col_end] = pd.to_datetime(df[col_end], errors="coerce")
+    坏行 = df[col_start].isna() | df[col_end].isna()
+    if 坏行.any():
+        logger.warning("丢弃 %d 条日期无法解析的活动:\n%s", 坏行.sum(), df[坏行].to_string())
+        df = df[~坏行]
 
     df = df.loc[df[col_end] > now + timedelta(hours=settings.future_buffer_hours)]
     df = df.loc[df[col_start] < right_border]
@@ -57,10 +57,6 @@ def preprocess_data(
         by=[col_type, col_end, col_start], ascending=False
     )
     df = df[df[col_type] != -1]
-
-    unclassified = df[df[col_type] == -1]
-    if not unclassified.empty:
-        logger.info("未归类的活动:\n%s", unclassified.to_string())
 
     try:
         df.to_csv(data_path, index=False)

@@ -2,29 +2,18 @@
 针对游戏明日方舟特化的甘特图绘图工具，基于matplotlib | A Gantt chart plotting tool specialized for the mobile game "Arknights", developed using matplotlib.
 
 效果展示
-![效果展示](./Gantt.png)
+![效果展示](./Gantt.jpg)
 
-## todo
-- [ ] 自动爬取官方信息
-  - [ ] 森空岛->周常卡池
-  - [ ] 官方->活动信息
-- [ ] 重构代码，分离个人用途与游戏用途
-- [ ] 应用到wallpaper engine上
+## 使用
 
-## 一些排期经验
-### 普通ss
-- 商店：0-21天
-- 一层：0-14天
-- 二层：7-14天
+```bash
+uv sync          # 或 pip install httpx matplotlib pandas Pillow
 
-### 大型ss
-- 商店：0-28天
-- 一层：0-21天
-- 二层：7-21天
-- 三层：14-21天
+python main.py            # 生成 Gantt.jpg（数据每天只爬一次）
+python main.py --force    # 强制重新爬取
+python prts_scraper.py    # 只爬取活动数据并在控制台打印
+```
 
-### SS复刻
-- 商店：0-14天
-- 作战：0-10天
+数据全部来自 [PRTS Wiki](https://prts.wiki)：SMW ask 查活动时间、卡池一览与活动公告的 wikitext 解析卡池和子活动，需要网络。
 
-### 卡池：14天
+可选素材：`背景图/` 放任意背景图，`纹理/` 放纹理图（自动随机取色配色）；字体 `字体/NotoSansCJKsc-Regular.ttf` 不在仓库里，缺失时会回退到系统中文字体。

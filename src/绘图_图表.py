@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
+import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 import numpy as np
@@ -10,6 +13,8 @@ from PIL import Image as PILimage
 
 from src.config import settings
 from src.绘图_颜色 import set_alpha_channel
+
+logger = logging.getLogger(__name__)
 
 WEEK_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
 
@@ -29,8 +34,26 @@ def _缩放图片(路径: str, 目标宽: int, 目标高: int) -> np.ndarray:
     return np.array(img, dtype=np.float64) / 255.0
 
 
+def _setup_font() -> None:
+    font_path = Path(settings.font_path)
+    if font_path.exists():
+        fm.fontManager.addfont(str(font_path))
+        plt.rcParams["font.sans-serif"] = [settings.font_family]
+        return
+    # fallback: try system CJK fonts
+    for candidate in ("Noto Sans CJK SC", "Noto Sans CJK JP", "Droid Sans Fallback", "AR PL UMing CN"):
+        try:
+            plt.rcParams["font.sans-serif"] = [candidate]
+            fm.findfont(candidate, fallback_to_default=False)
+            logger.warning("字体 %s 不存在，回退到 %s", settings.font_path, candidate)
+            return
+        except Exception:
+            continue
+    logger.warning("无可用中文字体，图形中文可能显示为方块")
+
+
 def 创建画布(背景路径: str, 纹理路径: str, 事件数: int) -> tuple[plt.Figure, plt.Axes]:
-    plt.rcParams["font.sans-serif"] = [settings.font_family]
+    _setup_font()
     plt.rcParams["font.size"] = settings.font_size
     fig = plt.figure(figsize=settings.fig_size, facecolor=settings.fig_facecolor)
     ax = plt.subplot(111, frameon=False)
@@ -94,6 +117,7 @@ def plot_events(
             y=idx,
             width=bar_width,
             left=bar_left,
+            height=0.8,
             edgecolor="k",
             linewidth=1.618,
             color=colors[idx % len(colors)],
@@ -113,32 +137,30 @@ def _draw_label(
         return
 
     bar_end = bar_left + bar_width
+    # 每个汉字约 8 小时宽度（字号 16 时粗略估算）
+    text_w = len(name) * 8
+    visible_end = min(bar_end, total_hours)
 
-    if visible_width > 3 * 24:
-        # 足够宽，居中显示完整名称
-        ax.text(x=visible_start + visible_width / 2, y=idx, s=name,
-                va="center", ha="center", fontweight="bold")
-    elif visible_width > 24:
-        # 中等宽度，居中截断
-        max_chars = int(visible_width // 8)
-        if max_chars > 0:
-            ax.text(x=visible_start + visible_width / 2, y=idx, s=name[:max_chars],
-                    va="center", ha="center", fontweight="bold")
+    Y = idx - 0.04  # 微调：CJK 字体视觉中心偏上，稍下沉补偿
+    if visible_width >= text_w:
+        ax.text(x=visible_start + visible_width / 2, y=Y, s=name,
+                va="center", ha="center", fontweight="bold", clip_on=True)
     else:
-        # 窄条：用箭头将文字标在条外
-        visible_end = min(bar_end, total_hours)
         right_space = total_hours - max(visible_end, 0)
         left_space = visible_start
-        if right_space > left_space and right_space > 10:
-            ax.annotate(name, xy=(bar_end, idx), xytext=(bar_end + 12, idx),
+        if right_space > left_space and right_space > text_w:
+            ax.annotate(name, xy=(visible_end, Y), xytext=(visible_end + 12, Y),
                         arrowprops=dict(arrowstyle="->", color="white", lw=1.5),
                         va="center", ha="left", fontweight="bold", color="white",
                         clip_on=True)
-        elif left_space > 10:
-            ax.annotate(name, xy=(visible_start, idx), xytext=(max(visible_start - 12, 0), idx),
+        elif left_space > text_w:
+            ax.annotate(name, xy=(visible_start, Y), xytext=(max(visible_start - 12, 0), Y),
                         arrowprops=dict(arrowstyle="->", color="white", lw=1.5),
                         va="center", ha="right", fontweight="bold", color="white",
                         clip_on=True)
+        else:
+            ax.text(x=visible_start + visible_width / 2, y=Y, s=name,
+                    va="center", ha="center", fontweight="bold", fontsize=min(settings.font_size, 10), clip_on=True)
 
 
 def set_x_ticks(

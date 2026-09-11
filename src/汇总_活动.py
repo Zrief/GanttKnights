@@ -1,4 +1,4 @@
-"""数据层 — API 响应解析、合并长期活动、去重排序、存 CSV"""
+"""汇总层 — 合并商店与长期活动、去重排序、活动数据 CSV 读写"""
 
 from __future__ import annotations
 
@@ -6,45 +6,7 @@ import csv
 import logging
 from pathlib import Path
 
-logger = logging.getLogger("src.解析")
-
-# ---------- API 活动类型 → 数值 ----------
-
-API类型映射 = {
-    "支线故事": 1, "主线": 1, "故事集": 1, "合作活动": 1,
-    "其他活动": 1, "纪念活动": 1, "危机合约": 1,
-    "矢量突破": 1, "卫戍协议": 1, "争锋频道": 1, "纷争演绎": 1,
-    "登录活动": 2, "签到": 2,
-    "生息演算": 99, "集成战略": 99, "剿灭": 99, "保全": 99,
-}
-
-名称类型规则 = [
-    (["寻访", "中坚", "甄选", "招募", "限定", "标准池", "中坚池", "跨年"], 0),
-    (["战斗", "SideStory", "故事集", "资源收集", "复刻"], 1),
-    (["签到", "赠送", "领取", "月卡", "专享", "补给"], 2),
-    (["家具", "时装", "新装", "主题", "上架", "风尚"], -1),
-    (["剿灭", "保全", "生息", "集成战略"], 99),
-]
-
-
-def 分类事件(API类型: str = "", 事件名: str = "") -> int:
-    if API类型 and API类型 in API类型映射:
-        return API类型映射[API类型]
-    for 关键词列表, 类型 in 名称类型规则:
-        for kw in 关键词列表:
-            if kw in 事件名:
-                return 类型
-    return 1
-
-
-def 解析API时间戳(ts_info) -> str | None:
-    """把 PRTS API 的 timestamp 转成 'YYYY-MM-DD HH:MM:00'"""
-    if isinstance(ts_info, dict):
-        parts = ts_info.get("raw", "").split("/")
-        if len(parts) >= 6:
-            _, y, m, d, h, mi = parts[:6]
-            return f"{y}-{m.zfill(2)}-{d.zfill(2)} {h.zfill(2)}:{mi.zfill(2)}:00"
-    return None
+logger = logging.getLogger("src.汇总")
 
 
 # ---------- 商店合并 ----------
@@ -110,12 +72,23 @@ def 合并长期活动(活动列表: list[dict], 文件路径: str | Path, 现�
 
 # ---------- 去重排序 ----------
 
+def _提取干员(名称: str) -> str:
+    """从卡池名称中提取 · 后面的干员名，用于卡池去重"""
+    if " · " in 名称:
+        return 名称.split(" · ", 1)[1]
+    return ""
+
+
 def 去重排序(活动列表: list[dict]) -> list[dict]:
-    """按名称+时间去重，按开始时间排序"""
+    """按干员名+时间去重（卡池），按开始时间排序"""
     seen = set()
     去重后 = []
     for a in 活动列表:
-        key = (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
+        if a["类型"] == 0:
+            干员 = _提取干员(a["名称"])
+            key = (干员, a["开始时间"], a["结束时间"], a["类型"]) if 干员 else (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
+        else:
+            key = (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
         if key not in seen:
             seen.add(key)
             去重后.append(a)
@@ -136,8 +109,17 @@ def 保存CSV(活动列表: list[dict], 输出路径: str | Path) -> str:
     return str(路径)
 
 
+def _卡池合并key(条目: dict) -> str:
+    """卡池统一键名：优先用干员名，否则用名称"""
+    if 条目["类型"] == 0:
+        干员 = _提取干员(条目["名称"])
+        if 干员:
+            return 干员
+    return 条目["名称"]
+
+
 def 合并保存CSV(新活动列表: list[dict], 输出路径: str | Path) -> str:
-    """合并式保存：读已有数据 + 新数据按名称覆盖 + 写回"""
+    """合并式保存：读已有数据 + 新数据覆盖 + 写回（卡池按干员名去重）"""
     路径 = Path(输出路径)
     # 读已有数据
     已有: dict[str, dict] = {}
@@ -146,15 +128,18 @@ def 合并保存CSV(新活动列表: list[dict], 输出路径: str | Path) -> st
             reader = csv.DictReader(f)
             for row in reader:
                 if row.get("名称", "").strip():
-                    已有[row["名称"]] = {
+                    类型 = int(row["类型"])
+                    键名 = 干员名 if (干员名 := _提取干员(row["名称"])) and 类型 == 0 else row["名称"]
+                    已有[键名] = {
                         "名称": row["名称"],
                         "开始时间": row["开始时间"],
                         "结束时间": row["结束时间"],
-                        "类型": int(row["类型"]),
+                        "类型": 类型,
                     }
-    # 新数据按名称覆盖
+    # 新数据覆盖
     for a in 新活动列表:
-        已有[a["名称"]] = {
+        键名 = _卡池合并key(a)
+        已有[键名] = {
             "名称": a["名称"],
             "开始时间": a["开始时间"],
             "结束时间": a["结束时间"],

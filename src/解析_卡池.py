@@ -1,188 +1,176 @@
-"""卡池解析 — 从 PRTS 限时寻访页提取卡池数据"""
+"""卡池解析 — 通过 MediaWiki API 取 卡池一览 的 wikitext 并解析
+
+卡池一览页由 bot 维护（页面内含 Bot Edit Anchor 标记），wikitable 格式稳定：
+时间列是带年份的 `YYYY-MM-DD HH:MM~<br/>YYYY-MM-DD HH:MM`，干员名在
+{{干员头像|名字}} 模板里，因此直接按分区标题 + 表格结构解析 wikitext，
+不依赖 HTML 渲染结果。页面仅记录本年度寻访，对按周绘图足够。
+"""
 
 from __future__ import annotations
 
+import csv
 import logging
 import re
 from pathlib import Path
 
-import httpx
-from bs4 import BeautifulSoup
+from src.获取_prts import PRTS_API, 请求
 
 logger = logging.getLogger(__name__)
 
-PRTS_URL = "https://prts.wiki/w/卡池一览/限时寻访"
-总览_URL = "https://prts.wiki/w/卡池一览"
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/125.0.0.0 Safari/537.36"
-)
+# 分区标题关键词 → 名称前缀 → 是否带序号列
+分区规则: list[tuple[str, str, bool]] = [
+    ("限时寻访", "【寻访】", False),
+    ("常驻标准寻访", "【标准池】", True),
+    ("常驻中坚寻访", "【中坚池】", True),
+]
 
-# 匹配 "2026-05-01 07:00~2026-05-15 03:59"
 时间_RE = re.compile(
-    r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*[~\u301c\uff5e\u2010-\u2015]\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})"
+    r"(\d{4}-\d{2}-\d{2})\s*(\d{2}:\d{2})\s*~\s*(?:<br\s*/?>)?\s*(\d{4}-\d{2}-\d{2})\s*(\d{2}:\d{2})"
 )
-
-# 提取核心卡池名（去掉前缀，去掉"寻访"等后缀）
-卡池名_RE = re.compile(r"[【「](.+?)[】」]")
-
-# 提取六星干员名（在【】内，且不含"加入""仅限""从未""寻访"等关键词）
-六星干员_RE = re.compile(r"[【「]([^】」]+)[】」]")
+链接_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
+干员_RE = re.compile(r"\{\{干员头像\|([^|}]+)")
+标题_RE = re.compile(r"^==+(.+?)==+", re.M)
+单元格属性_RE = re.compile(r'^\s*(?:style|class|colspan|rowspan)="[^"]*"\s*\|\s*')
 
 
-def 提取六星(文本: str) -> str:
-    """从六星列文本中提取干员名，多个用/分隔"""
-    跳过 = {"寻访", "加入", "标准寻访", "中坚寻访", "限定寻访",
-            "春节", "庆典", "夏季", "精英", "特殊", "战术",
-            "仅限", "从未", "以下", "期间", "获取", "新春"}
-    names = []
-    for m in 六星干员_RE.finditer(文本):
-        name = m.group(1).strip()
-        if name and not any(kw in name for kw in 跳过):
-            # 去掉后缀如" [限定]"
-            name = name.replace(" [限定]", "").split("[")[0].strip()
-            if name and name not in names:
-                names.append(name)
-    return " / ".join(names) if names else ""
-
-
-def 截短卡池名(原标题: str) -> str:
-    """把长标题截短为简洁名"""
-    # 取【】中的核心名
-    for m in 卡池名_RE.finditer(原标题):
-        short = m.group(1)
-        if short not in ("限定寻访·庆典", "限定寻访·春节", "限定寻访·夏季", "跨年欢庆寻访"):
-            return short
-    # 直接取原标题去掉前导描述
-    return 原标题.strip()
-
-
-def 抓取限时寻访() -> list[dict]:
-    """解析 PRTS 限时寻访一览表，返回卡池列表"""
-    try:
-        r = httpx.get(PRTS_URL, headers={"User-Agent": UA}, timeout=30)
-        r.raise_for_status()
-    except Exception:
-        logger.exception("获取限时寻访页面失败")
+def 抓取卡池一览() -> list[dict]:
+    """请求 卡池一览 的 wikitext，解析全部限时/标准/中坚卡池"""
+    resp = 请求(
+        PRTS_API,
+        params={"action": "parse", "page": "卡池一览", "prop": "wikitext", "format": "json"},
+    )
+    if resp is None:
+        logger.warning("卡池一览请求失败")
         return []
-
-    soup = BeautifulSoup(r.text, "html.parser")
-    parser = soup.find("div", class_="mw-parser-output")
-    if not parser:
+    字段 = resp.json().get("parse", {}).get("wikitext", {})
+    wikitext = 字段.get("*", "") if isinstance(字段, dict) else str(字段)
+    if not wikitext:
+        logger.warning("卡池一览 wikitext 为空")
         return []
+    return 解析卡池wikitext(wikitext)
 
-    tables = parser.find_all("table")
-    if not tables:
-        return []
 
-    # 主表格是第一个大表格
-    main = tables[0]
-    rows = main.find_all("tr")
-
-    结果 = []
-    for ri, row in enumerate(rows):
-        cells = row.find_all(["th", "td"])
-        if ri == 0 or len(cells) < 4:
+def 解析卡池wikitext(wikitext: str) -> list[dict]:
+    """把 卡池一览 wikitext 解析为卡池条目（纯函数，便于离线测试）"""
+    结果: list[dict] = []
+    for 关键词, 前缀, 带序号 in 分区规则:
+        区文本 = _提取分区(wikitext, 关键词)
+        if not 区文本:
+            logger.warning("卡池一览未找到分区: %s", 关键词)
             continue
+        条目 = _解析分区表格(区文本, 前缀, 带序号)
+        logger.info("  %s: %d 条", 关键词, len(条目))
+        结果.extend(条目)
+    logger.info("解析卡池一览: %d 条", len(结果))
+    return 结果
 
-        # 第一列：卡池名（可能有链接）
-        name_cell = cells[0]
-        link = name_cell.find("a")
-        卡池名 = name_cell.get_text(strip=True).replace("\u200b", "")
 
-        # 第二列：时间
-        时间文本 = cells[1].get_text(strip=True).replace("\u200b", "")
-        tm = 时间_RE.search(时间文本)
+def _提取分区(wikitext: str, 关键词: str) -> str:
+    """截取 ==标题== 含关键词的分区正文"""
+    标题们 = list(标题_RE.finditer(wikitext))
+    for i, m in enumerate(标题们):
+        if 关键词 not in m.group(1):
+            continue
+        终点 = 标题们[i + 1].start() if i + 1 < len(标题们) else len(wikitext)
+        return wikitext[m.end():终点]
+    return ""
+
+
+def _表格行(区文本: str) -> list[list[str]]:
+    """把分区里的第一个 wikitable 拆成行，每行是单元格文本列表。
+
+    甄选池的单元格内嵌套了折叠 wikitable，用深度计数保证嵌套内容
+    整体留在所在单元格里，不被外层的 |- 和 | 切开。
+    """
+    行们: list[list[str]] = []
+    当前行: list[str] = []
+    当前列: list[str] = []
+    深度 = -1  # -1=尚未进入表格, 0=顶层表格, >0=嵌套表格
+
+    def _收列() -> None:
+        nonlocal 当前列
+        if 当前列:
+            当前行.append("\n".join(当前列).strip())
+            当前列 = []
+
+    def _收行() -> None:
+        nonlocal 当前行
+        _收列()
+        if 当前行:
+            行们.append(当前行)
+            当前行 = []
+
+    for line in 区文本.splitlines():
+        s = line.strip()
+        if 深度 == -1:
+            if s.startswith("{|"):
+                深度 = 0
+            continue
+        if 深度 > 0:
+            if s.startswith("{|"):
+                深度 += 1
+            elif s.startswith("|}"):
+                深度 -= 1
+            当前列.append(line)
+            continue
+        if s.startswith("{|"):
+            深度 += 1
+            当前列.append(line)
+        elif s.startswith("|}"):
+            break
+        elif s == "|-":
+            _收行()
+        elif s.startswith("|") or s.startswith("!"):
+            _收列()
+            当前列.append(单元格属性_RE.sub("", s[1:]))
+        else:
+            当前列.append(line)
+    _收行()
+    return 行们
+
+
+def _解析分区表格(区文本: str, 前缀: str, 带序号: bool) -> list[dict]:
+    结果: list[dict] = []
+    for cells in _表格行(区文本):
+        try:
+            if 带序号:
+                序号, 名单元格, 时间单元格, 六星单元格 = cells[0], cells[1], cells[2], cells[3]
+            else:
+                序号 = ""
+                名单元格, 时间单元格, 六星单元格 = cells[0], cells[1], cells[2]
+        except IndexError:
+            continue
+        tm = 时间_RE.search(时间单元格)
         if not tm:
             continue
-
-        # 第三列：六星干员
-        六星文本 = cells[2].get_text(strip=True).replace("\u200b", "").replace("限兑兑", "")
-        six = 提取六星(六星文本)
-
-        短名 = 截短卡池名(卡池名)
-        名称 = f"【寻访】{短名}" + (f" · {six}" if six else "")
-
+        名称 = _卡池名称(前缀, 带序号, 序号, 名单元格)
+        if not 名称:
+            continue
+        干员们 = list(dict.fromkeys(m.group(1).strip() for m in 干员_RE.finditer(六星单元格)))
+        if 干员们:
+            名称 = f"{名称} · {' / '.join(干员们)}"
         结果.append({
             "名称": 名称,
-            "开始时间": tm.group(1) + ":00",
-            "结束时间": tm.group(2) + ":00",
+            "开始时间": f"{tm.group(1)} {tm.group(2)}:00",
+            "结束时间": f"{tm.group(3)} {tm.group(4)}:00",
             "类型": 0,
         })
-
-    logger.info("解析限时寻访: %d 条", len(结果))
     return 结果
 
 
-def 抓取常驻寻访() -> list[dict]:
-    """从卡池总览页解析常驻标准寻访和常驻中坚寻访"""
-    try:
-        r = httpx.get(总览_URL, headers={"User-Agent": UA}, timeout=30)
-        r.raise_for_status()
-    except Exception:
-        logger.exception("获取卡池总览页面失败")
-        return []
-
-    soup = BeautifulSoup(r.text, "html.parser")
-    parser = soup.find("div", class_="mw-parser-output")
-    if not parser:
-        return []
-
-    结果 = []
-    目标标题 = {
-        "常驻标准寻访": "【标准池】",
-        "常驻中坚寻访": "【中坚池】",
-    }
-
-    for h in parser.find_all("h2"):
-        标题文本 = h.get_text(strip=True)
-        prefix = None
-        for kw, pre in 目标标题.items():
-            if kw in 标题文本:
-                prefix = pre
-                break
-        if not prefix:
+def _卡池名称(前缀: str, 带序号: bool, 序号: str, 名单元格: str) -> str:
+    if 带序号:
+        序号文本 = 序号.strip()
+        if not 序号文本:
+            return ""
+        return f"{前缀}#{序号文本}" if 序号文本.isdigit() else f"{前缀}{序号文本}"
+    for m in 链接_RE.finditer(名单元格):
+        目标 = m.group(1).strip()
+        if 目标.startswith(("文件:", "File:", "Image:")):
             continue
-
-        table = h.find_next_sibling("table")
-        if not table:
-            continue
-
-        rows = table.find_all("tr")
-        for ri, row in enumerate(rows):
-            cells = row.find_all(["th", "td"])
-            if ri == 0 or len(cells) < 5:
-                continue
-
-            序号 = cells[0].get_text(strip=True)
-            时间文本 = cells[2].get_text(strip=True).replace("\u200b", "")
-            tm = 时间_RE.search(时间文本)
-            if not tm or not 序号:
-                continue
-
-            # 从链接中提取六星干员名（第4列，索引3）
-            from urllib.parse import unquote
-            operators = []
-            for a in (cells[3].find_all("a") if len(cells) > 3 else []):
-                href = a.get("href", "")
-                if href.startswith("/w/"):
-                    name = unquote(href[3:])
-                    if name and name not in operators:
-                        operators.append(name)
-
-            op_str = " / ".join(operators)
-            名称 = f"{prefix}#{序号}" + (f" · {op_str}" if op_str else "")
-
-            结果.append({
-                "名称": 名称,
-                "开始时间": tm.group(1) + ":00",
-                "结束时间": tm.group(2) + ":00",
-                "类型": 0,
-            })
-
-    logger.info("解析常驻寻访: %d 条", len(结果))
-    return 结果
+        名称 = (m.group(2) or 目标).strip().removeprefix("寻访模拟/")
+        return f"{前缀}{re.sub(r'^【[^】]*】', '', 名称).strip()}"
+    return ""
 
 
 def 合并卡池CSV(卡池列表: list[dict], 文件路径: str | Path, 现在时间: str) -> list[dict]:
@@ -192,7 +180,6 @@ def 合并卡池CSV(卡池列表: list[dict], 文件路径: str | Path, 现在�
         return 卡池列表
 
     try:
-        import csv
         with open(路径, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             已有名称 = {a["名称"] for a in 卡池列表}

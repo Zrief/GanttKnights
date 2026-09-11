@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -8,11 +9,9 @@ from random import choice
 import matplotlib.pyplot as plt
 
 from src.config import settings, setup_logging
-from src.网络_prts import 获取事件列表, 获取公告页
-from src.解析_公告 import 解析分区
-from src.解析_事件 import (
-    解析API时间戳,
-    分类事件,
+from src.获取_prts import 获取事件列表
+from src.解析_API活动 import API转活动列表
+from src.汇总_活动 import (
     合并商店,
     合并长期活动,
     去重排序,
@@ -21,13 +20,12 @@ from src.解析_事件 import (
 from src.筛选_活动 import preprocess_data
 from src.绘图_图表 import plot_events, set_x_ticks, 创建画布
 from src.绘图_颜色 import extract_main_colors
-from src.解析_卡池 import 抓取限时寻访, 抓取常驻寻访, 合并卡池CSV
+from src.解析_卡池 import 抓取卡池一览, 合并卡池CSV
 
 logger = logging.getLogger("ganttknights")
 
 现在时间 = datetime.now()
 现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
-长期活动路径 = Path(__file__).resolve().parent / "数据" / "长期活动.csv"
 
 
 def 随机路径() -> tuple[str, str]:
@@ -44,44 +42,24 @@ def 随机路径() -> tuple[str, str]:
 
 def 更新数据() -> None:
     """第 1 步：爬取 + 解析 + 合并 + 保存"""
-    api原始 = 获取事件列表(settings.api_limit)
+    try:
+        api原始 = 获取事件列表(settings.api_limit)
+    except Exception:
+        logger.exception("获取事件列表失败（网络可能断开了）")
+        return
     if not api原始:
         logger.warning("API 未返回数据")
         return
 
-    活动列表 = []
-    for idx, (事件名, 条目) in enumerate(api原始):
-        属性 = 条目.get("printouts", {})
-        开始 = 解析API时间戳(属性.get("活动开始时间", [None])[0]) if 属性.get("活动开始时间") else None
-        结束 = 解析API时间戳(属性.get("活动结束时间", [None])[0]) if 属性.get("活动结束时间") else None
-        if not (开始 and 结束 and 结束 > 现在字符串):
-            continue
+    活动列表 = API转活动列表(api原始, 现在字符串)
 
-        网页 = 获取公告页(事件名)
-        if 网页 is None:
-            if 分类事件(事件名=事件名) == 99:
-                活动列表.append({"名称": 事件名, "开始时间": 开始, "结束时间": 结束, "类型": 99, "_parent": 事件名})
-                logger.info("  [%d] %s → 长期活动", idx + 1, 事件名)
-            else:
-                logger.info("  [%d] %s 无公告页，跳过", idx + 1, 事件名)
-            continue
-
-        子活动 = 解析分区(网页, 事件名)
-        if 子活动:
-            活动列表.extend(子活动)
-            logger.info("  [%d] %s → %d 条子活动", idx + 1, 事件名, len(子活动))
-        else:
-            logger.info("  [%d] %s 有公告页但无有效子活动", idx + 1, 事件名)
-
-    活动列表 = 合并长期活动(活动列表, 长期活动路径, 现在字符串)
+    活动列表 = 合并长期活动(活动列表, settings.long_term_path, 现在字符串)
     活动列表 = 合并商店(活动列表)
 
     # 卡池数据
-    卡池路径 = Path(__file__).resolve().parent / "数据" / "卡池.csv"
     try:
-        活动列表.extend(抓取限时寻访())
-        活动列表.extend(抓取常驻寻访())
-        活动列表 = 合并卡池CSV(活动列表, 卡池路径, 现在字符串)
+        活动列表.extend(抓取卡池一览())
+        活动列表 = 合并卡池CSV(活动列表, settings.pool_path, 现在字符串)
     except Exception:
         logger.exception("获取卡池数据失败")
 
@@ -94,9 +72,17 @@ def 更新数据() -> None:
         logger.warning("未获取到有效活动")
 
 
-def main():
-    # 第 1 步：获取最新活动数据
-    更新数据()
+def main(force: bool = False):
+    # 第 1 步：获取最新活动数据（每天只爬一次，--force 可强制重新爬取）
+    数据路径 = Path(settings.all_data_path)
+    if (
+        not force
+        and 数据路径.exists()
+        and datetime.fromtimestamp(数据路径.stat().st_mtime).date() == 现在时间.date()
+    ):
+        logger.info("今天已爬取过，跳过更新（--force 可强制更新）")
+    else:
+        更新数据()
 
     # 第 2 步：按时间窗口过滤
     今天 = 现在时间.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -137,7 +123,29 @@ def main():
     finally:
         plt.close(fig)
 
+    # 第 5 步：生成过期警告输出
+    from src.生成_警告 import 生成警告
+    try:
+        警告 = 生成警告(df, 提醒天数=3)
+        if 警告:
+            print("\n" + "=" * 54)
+            print(警告)
+            print("=" * 54)
+        else:
+            警告 = "博士，罗德岛当前所有行动均在正常排期内，无需提醒。"
+        Path(settings.warning_path).write_text(警告, encoding="utf-8")
+        logger.info("过期警告已保存至 %s", settings.warning_path)
+    except Exception:
+        logger.exception("生成警告失败")
+
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="明日方舟近期活动甘特图生成工具")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="强制重新爬取数据（忽略'今天已爬取过'检查）",
+    )
+    args = parser.parse_args()
     setup_logging()
-    main()
+    main(force=args.force)
