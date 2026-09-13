@@ -53,8 +53,6 @@ logger = logging.getLogger("ganttknights")
 ⚠️ APScheduler 3.11.3 的库默认值只有 **1 秒**——不显式写就等于"迟到 1 秒静默丢弃"。
 """
 
-会话上限 = 20
-"""记住的会话数上限（一台机器人被多少个群用过）。超出后按"最近用过"保留。"""
 
 
 def _原子写(路径: Path, 体: str) -> None:
@@ -73,7 +71,10 @@ def _原子写(路径: Path, 体: str) -> None:
 
 
 class 推送状态:
-    """`<数据目录>/推送状态.json`：记住会话 + 当日已推记账 + 上次结果。
+    """`<数据目录>/推送状态.json`：当日已推记账 + 上次结果。
+
+**推送目标不在这里**：它是配置项 `push.targets`（`list` 型），这样用户能在 AstrBot 设置页里
+直接增删——"想停掉某个群的推送就把它删掉"。这里只留"今天推过谁"的记账。
 
     ```json
     {
@@ -108,25 +109,6 @@ class 推送状态:
         except OSError:
             logger.exception("推送状态写不进去（不影响本次推送）：%s", self.路径)
 
-    # ---------- 会话记忆 ----------
-
-    def 会话们(self) -> list[str]:
-        """记住的会话列表（最近用过的在后）"""
-        会话 = self.读().get("会话")
-        return [s for s in 会话 if isinstance(s, str) and s] if isinstance(会话, list) else []
-
-    def 记住会话(self, unified_msg_origin: str) -> bool:
-        """把"用过指令的会话"记下来；返回是否新增（入口层用它决定要不要重新武装任务）"""
-        会话 = self.会话们()
-        新增 = unified_msg_origin not in 会话
-        if not 新增:
-            会话.remove(unified_msg_origin)
-        会话.append(unified_msg_origin)
-        数据 = self.读()
-        数据["会话"] = 会话[-会话上限:]
-        self._写(数据)
-        return 新增
-
     # ---------- 幂等记账 ----------
 
     def 该推吗(self, unified_msg_origin: str, 今天: str) -> bool:
@@ -135,14 +117,15 @@ class 推送状态:
         已推 = 已推 if isinstance(已推, dict) else {}
         return 已推.get(unified_msg_origin) != 今天
 
-    def 记成功(self, unified_msg_origin: str, 今天: str) -> None:
+    def 记成功(self, unified_msg_origin: str, 今天: str, 目标们: tuple[str, ...] = ()) -> None:
         数据 = self.读()
         已推 = 数据.get("已推")
         已推 = dict(已推) if isinstance(已推, dict) else {}
         已推[unified_msg_origin] = 今天
-        # 顺手把已经不在会话表里的记账删掉，免得文件里留一堆旧会话
-        现存 = set(self.会话们())
-        数据["已推"] = {k: v for k, v in 已推.items() if k in 现存}
+        # 顺手把已经从"推送目标"里删掉的记账清掉，免得文件里留一堆旧会话
+        if 目标们:
+            已推 = {k: v for k, v in 已推.items() if k in set(目标们)}
+        数据["已推"] = 已推
         self._写(数据)
 
     def 记失败(self, 说明: str) -> None:
@@ -157,10 +140,9 @@ class 推送状态:
         上次 = self.读().get("上次")
         return 上次 if isinstance(上次, dict) else {}
 
-    def 今天推过吗(self, 今天: str) -> bool:
-        """所有会话今天都推过了吗（给 `/甘特图状态` 用）"""
-        会话 = self.会话们()
-        return bool(会话) and all(not self.该推吗(s, 今天) for s in 会话)
+    def 今天推过吗(self, 今天: str, 目标们: tuple[str, ...] = ()) -> bool:
+        """所有目标会话今天都推过了吗（给 `/甘特图状态` 用）"""
+        return bool(目标们) and all(not self.该推吗(s, 今天) for s in 目标们)
 
 
 def _现在() -> str:
@@ -188,7 +170,7 @@ class 推送服务:
         幂等且便宜（一次字符串比较），所以入口层可以在 `initialize()` 与**每次指令**后都调一次
         ——这样 WebUI 里改开关/改时刻不用重启插件就能生效。
         """
-        会话数 = len(self.状态.会话们())
+        会话数 = len(运行配置.推送目标)
         时, 分 = 运行配置.推送时点()
         该武装 = 运行配置.推送开关 and 会话数 > 0
         # 指纹必须带上"开关本身"：否则"关掉了"与"开着但还没会话"都是 (False, …)，
@@ -203,7 +185,8 @@ class 推送服务:
             self._关()
             if not 运行配置.推送开关:
                 return "推送：未开启"
-            return "推送：已开启，但还没有任何会话用过 /甘特图（先在目标群里发一次）"
+            return ("推送：已开启，但推送目标列表还是空的"
+                    "（在目标群里发一次 /甘特图 会自动加进去，也可以到插件设置里填）")
 
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -254,7 +237,7 @@ class 推送服务:
         if not 运行配置.推送开关:
             return "推送：未开启"
         if self._调度器 is None:
-            return f"推送：已开启（{运行配置.推送时刻}），但还没有可用会话"
+            return f"推送：已开启（{运行配置.推送时刻}），但推送目标列表是空的"
         下次 = getattr(self._调度器.get_job(任务ID), "next_run_time", None)
         下次文本 = 下次.strftime("%m-%d %H:%M") if 下次 else "未排定"
         return f"推送：每天 {运行配置.推送时刻}，下次 {下次文本}"
@@ -277,12 +260,12 @@ class 推送服务:
         幂等靠磁盘上的记账：热重载后即便有两个实例，第二个也会在这里看到"今天已推过"。
         """
         async with self._任务锁:
-            会话们 = self.状态.会话们()
-            if not 会话们:
-                self.状态.记失败("没有任何会话用过 /甘特图")
-                return "还没有任何会话用过 /甘特图，无法推送"
+            目标们 = 运行配置.推送目标
+            if not 目标们:
+                self.状态.记失败("没有配置推送目标")
+                return "还没有配置推送目标（插件设置 → 每日推送 → 推送目标会话列表）"
             今天 = datetime.now().date().isoformat()
-            待推 = [s for s in 会话们 if self.状态.该推吗(s, 今天)]
+            待推 = [s for s in 目标们 if self.状态.该推吗(s, 今天)]
             if not 待推:
                 return f"{今天} 已经推过了，跳过"
 
@@ -300,7 +283,7 @@ class 推送服务:
             for umo in 待推:
                 try:
                     if await self.发送(umo, 文本, str(图片)):
-                        self.状态.记成功(umo, 今天)
+                        self.状态.记成功(umo, 今天, 目标们)
                         成功 += 1
                     else:
                         失败.append(umo)

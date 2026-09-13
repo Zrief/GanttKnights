@@ -51,6 +51,19 @@ python prts_scraper.py               # 只爬取活动数据并在控制台打�
 
 可选素材：`背景图/` 放任意背景图（**每天按日期固定取一张**，也可以在配置里指定某一张；整套色系由它推导）；字体 `字体/NotoSansCJKsc-Regular.otf` 等静态字重不在仓库里——**缺失时会按平台回退到系统中文字体**（Windows 微软雅黑 / macOS 苹方 / Linux Noto CJK），若你按 AstrBot 的约定把 ttf 命名为 `font.ttf` 放进 `data/` 目录，那支字体会被优先使用。
 
+## 开发与测试
+
+零依赖测试（不需要 AstrBot、不需要 matplotlib、不联网）：
+
+```bash
+pip install pytest apscheduler      # apscheduler 已在 requirements.txt 里；pytest 是开发用
+pytest -q                           # tests/ 下四个文件：配置契约 / 时间解析 / 数据日差 / 推送
+```
+
+`tests/` 钉住的是**契约**而不是业务：配置字段与 README 一致、越界值被夹取、
+公告年份按父活动时间窗推断、日差语义、推送目标与幂等记账。
+需要真实 AstrBot 的端到端检查（模拟实例加载插件、真渲染、真抓取）不在仓库里，属于本地验证脚本。
+
 ## 许可与素材来源
 
 - **代码**：[MIT](./LICENSE)，Copyright (c) 2026 Zrief。
@@ -61,3 +74,52 @@ python prts_scraper.py               # 只爬取活动数据并在控制台打�
   若要再分发或用于其他场合，请自行替换成你有权使用的图片。
 - **致谢**：指令元数据与配置夹取的做法参考了 [astrbot_plugin_ark_calendar](https://github.com/zhewang448/astrbot_plugin_ark_calendar)（罗德岛行动终端）；
   插件骨架与"配置即契约"的测试思路参考了 AstrBot 插件 `astrbot_plugin_palette`。感谢 AstrBot 与各插件的作者。
+
+<!-- 配置项:开始 -->
+
+## 配置项
+
+在 AstrBot 的插件配置页里改；下表与 `_conf_schema.json` 一一对应（`tests/test_配置契约.py` 会核对两边一致）。
+
+### render · 出图
+
+影响画面的参数。数值范围由后端强制夹取；这里的 minimum/maximum 只是文档，表单不读它们。改动任何一项，下一次出图就按新值渲染。
+
+| 键 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `render.title` | string | 近期活动一览 | 图片主标题 |
+| `render.left_offset_days` | int | 3（0~30） | 时间窗左侧回溯天数（图上显示今天之前多少天的活动（0 表示只看今天起）。） |
+| `render.right_offset_days` | int | 22（7~30） | 时间窗右侧前瞻天数（图上显示今天之后多少天；实际右边界会对齐到当周周日。上限 30：再长时一条活动的色条会被压得很窄，名字与日期刻度的摆放判定开始贴边（实测 35 天余量已到 0~4px）。） |
+| `render.remind_days` | int | 3（1~30） | 过期提醒天数（提醒文案里提前多少天提醒即将结束的活动。） |
+| `render.background_file` | string | （空） | 指定背景图文件（背景图目录内的文件名（如 沉沦者.WEBP），也可写绝对路径。留空则每天按日期自动取一张（同一天固定是同一张，换天才换）——同一天里群里看到的图长得一样，不会因为谁先谁后而换配色。） |
+| `render.background_dir` | string | （空） | 背景图目录（留空 = 插件自带的 背景图/ 目录（两张示例图）。换成自己的图建议放到 data/plugin_data/astrbot_plugin_ganttknights/ 下再指过来——插件升级不会覆盖那里。） |
+
+### panels · 底栏面板
+
+控制底栏三个上新区是否出现在图里。关掉的区不会画，提醒文案里也不会再提它。
+
+| 键 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `panels.voucher` | bool | 开 | 展示「凭证兑换」面板 |
+| `panels.outfit` | bool | 开 | 展示「新增时装」面板 |
+| `panels.module` | bool | 开 | 展示「新增模组」面板 |
+
+### data · 数据源
+
+数据来自 PRTS Wiki，需要网络。请求条数与「进行中」判定的小时宽限是内部旋钮，不在这里暴露（内核默认 50 条 / 4 小时，可用 GK_API_LIMIT / GK_FUTURE_BUFFER_HOURS 覆盖）。
+
+| 键 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `data.auto_refresh_daily` | bool | 开 | 每天首次出图时自动更新数据（关闭后只出图不爬取，数据靠自己跑 python cli.py --force 更新。） |
+
+### push · 每日推送
+
+开启后，每天在指定时刻把甘特图推送到下面的目标会话列表。
+
+| 键 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `push.enabled` | bool | 关 | 开启每日推送（开启前要有推送目标（见下一项）。一份图只渲染一次，然后发给列表里的每个会话。） |
+| `push.time` | string | 08:00 | 每日推送时刻（HH:MM，24 小时制）（按运行 AstrBot 那台机器的本地时间。别设在 00:00~04:00：游戏数据在北京时间 04:00 日切，那段时间出图可能还是前一天的数据。格式不对或越界会退回 08:00。） |
+| `push.targets` | list | （空） | 推送目标会话列表（列表为空时，第一个发 /甘特图 的会话会自动被加进来（省去手动填）；之后由你在这里增删——**想停掉某个群的推送，把它从这一项里删掉即可**。会话标识可在目标群发 /甘特图状态 查看。） |
+
+<!-- 配置项:结束 -->

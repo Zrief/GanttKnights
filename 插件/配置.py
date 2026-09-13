@@ -37,6 +37,27 @@ from typing import Any
 # 那个模块（它会拖进 matplotlib，1s 级阻塞），只能在这里复制一份，靠验证脚本钉住契约。
 底栏区名 = ("凭证兑换", "新增时装", "新增模组")
 
+字段映射: dict[tuple[str, str], tuple[str, str]] = {
+    ("render", "title"): ("标题", "文本非空"),
+    ("render", "left_offset_days"): ("左边界天数", "整数"),
+    ("render", "right_offset_days"): ("右边界天数", "整数"),
+    ("render", "remind_days"): ("提醒天数", "整数"),
+    ("render", "background_file"): ("指定背景", "文本"),
+    ("render", "background_dir"): ("背景目录", "文本"),
+    ("panels", "voucher"): ("凭证面板", "开关"),
+    ("panels", "outfit"): ("时装面板", "开关"),
+    ("panels", "module"): ("模组面板", "开关"),
+    ("data", "auto_refresh_daily"): ("每日自动更新", "开关"),
+    ("push", "enabled"): ("推送开关", "开关"),
+    ("push", "time"): ("推送时刻", "时刻"),
+    ("push", "targets"): ("推送目标", "文本列表"),
+}
+"""`(节, schema 键) → (运行配置 字段名, 取值方式)`。
+
+**这张表就是配置契约**：`读取配置()` 按它读、`tests/test_配置契约.py` 按它比对
+schema 与 README。加字段时只改这里 + schema + README，三边对不上会直接测挂。
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class 运行配置:
@@ -58,6 +79,7 @@ class 运行配置:
     # push
     推送开关: bool = False
     推送时刻: str = "08:00"
+    推送目标: tuple[str, ...] = ()
 
     def 底栏分区(self) -> tuple[str, ...] | None:
         """要展示的底栏分区；三个都开时返回 None（走内核默认路径，行为与改造前一致）。"""
@@ -125,6 +147,27 @@ def 读取文本(值: Any, 默认值: str = "") -> str:
     return 值.strip() if isinstance(值, str) else 默认值
 
 
+def 读取文本列表(值: Any) -> tuple[str, ...]:
+    """读一个 `list` 型配置项 → 去空、去重、保序的字符串元组。
+
+    容忍三种写法：`list`（WebUI 的正常形态）、单个字符串（手改配置时常见，
+    按换行/逗号切）、以及坏值（返回空）。**不去排序**：列表顺序就是用户看到的顺序。
+    """
+    if isinstance(值, (list, tuple)):
+        原始 = [x for x in 值]
+    elif isinstance(值, str):
+        文本 = 值.replace("，", ",").replace("\r", "\n")
+        原始 = [x for 段 in 文本.split("\n") for x in 段.split(",")]
+    else:
+        return ()
+    出: list[str] = []
+    for x in 原始:
+        项 = x.strip() if isinstance(x, str) else ""
+        if 项 and 项 not in 出:
+            出.append(项)
+    return tuple(出)
+
+
 def 读取开关(值: Any, 默认值: bool) -> bool:
     if isinstance(值, bool):
         return 值
@@ -139,28 +182,24 @@ def 读取配置(config: Any) -> 运行配置:
     """把 AstrBotConfig（或任何 dict-like）读成 `运行配置`。
 
     每次调用都重新读：WebUI 改配置后无需重载插件即可生效（AstrBotConfig 是同一个 dict 实例）。
+
+    按 `字段映射` 表驱动地取值 —— 这张表是**配置契约的单一来源**：
+    `tests/test_配置契约.py` 拿它比对 `_conf_schema.json` 的默认值/范围与 README 的字段表，
+    所以"加了配置项却忘了夹取、或忘了写文档"会直接测挂。
     """
     默认 = 运行配置()
-    render = 读取节(config, "render")
-    panels = 读取节(config, "panels")
-    data = 读取节(config, "data")
-    push = 读取节(config, "push")
-
-    def 整数(节: dict[str, Any], 键: str, 默认值: int) -> int:
-        最小, 最大 = 范围[键]
-        return 夹取整数(节.get(键), 默认值, 最小, 最大)
-
-    return 运行配置(
-        标题=读取文本(render.get("title"), 默认.标题) or 默认.标题,
-        左边界天数=整数(render, "left_offset_days", 默认.左边界天数),
-        右边界天数=整数(render, "right_offset_days", 默认.右边界天数),
-        提醒天数=整数(render, "remind_days", 默认.提醒天数),
-        指定背景=读取文本(render.get("background_file"), 默认.指定背景),
-        背景目录=读取文本(render.get("background_dir"), 默认.背景目录),
-        凭证面板=读取开关(panels.get("voucher"), 默认.凭证面板),
-        时装面板=读取开关(panels.get("outfit"), 默认.时装面板),
-        模组面板=读取开关(panels.get("module"), 默认.模组面板),
-        每日自动更新=读取开关(data.get("auto_refresh_daily"), 默认.每日自动更新),
-        推送开关=读取开关(push.get("enabled"), 默认.推送开关),
-        推送时刻=规范化时刻(push.get("time")),
-    )
+    取值 = {
+        "整数": lambda 值, 默认值, 键: 夹取整数(值, 默认值, *范围[键]),
+        "开关": lambda 值, 默认值, 键: 读取开关(值, 默认值),
+        "文本": lambda 值, 默认值, 键: 读取文本(值, 默认值),
+        "文本非空": lambda 值, 默认值, 键: 读取文本(值, 默认值) or 默认值,
+        "时刻": lambda 值, 默认值, 键: 规范化时刻(值),
+        "文本列表": lambda 值, 默认值, 键: 读取文本列表(值),
+    }
+    值们: dict[str, Any] = {}
+    节缓存: dict[str, dict[str, Any]] = {}
+    for (节, 键), (字段, 类型) in 字段映射.items():
+        节缓存.setdefault(节, 读取节(config, 节))
+        默认值 = getattr(默认, 字段)
+        值们[字段] = 取值[类型](节缓存[节].get(键), 默认值, 键)
+    return 运行配置(**值们)

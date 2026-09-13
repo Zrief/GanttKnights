@@ -9,4 +9,14 @@ dependencies = [
     "matplotlib>=3.10",
     "numpy>=1.26",
     "Pillow>=10.0",
+    "APScheduler>=3.11",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 关掉缓存插件：它用 tempfile.mkdtemp() 建 .pytest_cache，在受限环境里会因 DACL 拿不到权限
+# （WinError 5）。测试本来就不依赖缓存。
+addopts = "-p no:cacheprovider"

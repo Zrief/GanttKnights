@@ -1,4 +1,4 @@
-﻿"""网络层 — 只负责发 HTTP 请求，返回原始数据"""
+"""网络层 — 只负责发 HTTP 请求，返回原始数据"""
 
 from __future__ import annotations
 

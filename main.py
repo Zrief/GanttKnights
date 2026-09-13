@@ -1,4 +1,4 @@
-﻿"""AstrBot 插件入口 —— 明日方舟近期活动甘特图。
+"""AstrBot 插件入口 —— 明日方舟近期活动甘特图。
 
 入口布局（`astrbot/core/star/star_manager.py::PluginManager._get_modules()`）：
 
@@ -110,6 +110,31 @@ class GanttKnightsPlugin(Star):
         """现读配置（WebUI 改完无需重载插件；定时任务也走这里）"""
         return 读取配置(self.config)
 
+    # ==================== 推送目标 ====================
+
+    def _补齐首个推送目标(self, unified_msg_origin: str, 运行配置) -> None:
+        """`push.targets` 为空时，把"第一个用指令的会话"写进配置。
+
+        为什么写配置而不是状态文件：用户要能**在设置页里删掉某个群的推送**，
+        所以推送目标必须是配置项（`list` 型）。列表非空时一律不再自动添加——
+        用户删掉的那一项不该被下一次指令又加回来。
+        """
+        if 运行配置.推送目标:
+            return
+        节 = self.config.get("push") if hasattr(self.config, "get") else None
+        if not isinstance(节, dict):
+            logger.warning("配置里没有 push 节，跳过自动填写推送目标")
+            return
+        节["targets"] = [unified_msg_origin]
+        保存 = getattr(self.config, "save_config", None)
+        if callable(保存):
+            try:
+                保存()
+            except Exception:
+                logger.exception("推送目标写回配置失败（本次运行仍然生效）")
+        logger.info("推送目标列表为空 → 已把本会话记进配置 push.targets：%s（可在插件设置里增删）",
+                    unified_msg_origin)
+
     async def _发送(self, unified_msg_origin: str, 文本: str, 图片路径: str) -> bool:
         """把一条消息投递到指定会话。
 
@@ -132,11 +157,12 @@ class GanttKnightsPlugin(Star):
     @filter.command(甘特图命令.name, alias=甘特图命令.alias_set)
     async def 出图(self, event: AstrMessageEvent):
         """生成明日方舟近期活动甘特图长图。"""
-        # 谁用过指令就记住谁：每日推送的目标由此自动得到，不需要用户填会话 ID（§16）。
-        # 顺手重新武装一次定时任务（配置在 WebUI 里改过时不必重启插件）。
-        self.推送状态.记住会话(event.unified_msg_origin)
         运行配置 = self.运行配置()
-        self.推送.确保任务(运行配置)
+        # 推送目标列表为空时，把"第一个用指令的会话"写进配置项 `push.targets`：
+        # 零配置也能用上推送；写进配置之后它就在设置页里可见、可删（用户要的"能删订阅"）。
+        self._补齐首个推送目标(event.unified_msg_origin, 运行配置)
+        # 顺手重新武装一次定时任务（配置在 WebUI 里改过时不必重启插件）
+        self.推送.确保任务(self.运行配置())
         yield event.plain_result(文案.准备中)
         try:
             结果 = await self.渲染.出图(
@@ -235,7 +261,9 @@ class GanttKnightsPlugin(Star):
         else:
             数据行 = "还没有数据（首次出图时抓取）"
         快照日期 = self.渲染.最近变化日期() or "无"
-        会话数 = len(self.推送状态.会话们())
+        目标们 = 运行配置.推送目标
+        本会话 = event.unified_msg_origin
+        在列 = "已在推送目标里" if 本会话 in 目标们 else "不在推送目标里"
         上次 = self.推送状态.上次()
         上次行 = ""
         if 上次:
@@ -247,6 +275,7 @@ class GanttKnightsPlugin(Star):
             f"罗德岛甘特图 v{插件版本}\n"
             f"数据：{数据行}｜最近快照 {快照日期}\n"
             f"{self.推送.一句话(运行配置)}\n"
-            f"已记住 {会话数} 个会话（本会话：{event.unified_msg_origin}）"
+            f"推送目标 {len(目标们)} 个（可在插件设置里增删）\n"
+            f"本会话：{本会话}（{在列}）"
             f"{上次行}"
         )
