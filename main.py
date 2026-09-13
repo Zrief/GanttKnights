@@ -1,78 +1,112 @@
-"""CLI 入口 — 生成明日方舟近期活动甘特图（数据每天只爬一次）。
+"""AstrBot 插件入口 —— 明日方舟近期活动甘特图。
 
-用法:
-    python main.py                       # 生成 Gantt.jpg（数据每天只爬一次）
-    python main.py --force               # 强制重新爬取
-    python main.py --bootstrap --force   # 数据初次建立：回溯已结束活动的公告
+入口布局（`astrbot/core/star/star_manager.py::PluginManager._get_modules()`）：
 
-编排逻辑（"今天要不要爬"这类策略）在本文件；实际渲染在 src/流水线.py，
-与 AstrBot 插件入口（astrbot_plugin.py）共用同一条流水线。
+    main.py      ← AstrBot 认它（与目录同名的 <目录名>.py 也会被认，但 main.py 优先）
+    cli.py       ← 命令行入口（python cli.py），单人调试时比重启 AstrBot 快得多
+
+两者共用 `src/流水线.py` 这一条渲染内核。
+
+设计要点（详见 docs/插件化路线.md）：
+
+* **加载期不碰重依赖**：matplotlib 只在工作线程里被导入（§5.5），
+  `initialize()` 立即返回，不会拖慢 AstrBot 启动；
+* **一切阻塞都在 `asyncio.to_thread` 里**：渲染是秒级 CPU 占用，取数是同步 httpx（§5.6）；
+* **数据与代码分家**：数据写 `data/plugin_data/<插件名>/`（官方 storage 写法），
+  字体/背景图留在插件目录里只读（§5.3）；
+* 指令元数据只有一份：`插件/指令.py` 的 `CommandSpec`（§6.3）。
 """
 
 from __future__ import annotations
 
-import argparse
-import logging
 from datetime import datetime
 from pathlib import Path
 
-from src.config import settings, setup_logging
-from src.流水线 import (
-    今天写过,
-    更新增预告,
-    更新数据,
-    render_once,
-)
+from astrbot.api import AstrBotConfig, logger
+from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.star import Context, Star
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-logger = logging.getLogger("ganttknights")
+from .插件 import 文案
+from .插件.配置 import 读取配置
+from .插件.指令 import 帮助命令, 甘特图命令, 生成帮助文本
+from .插件.渲染 import 渲染服务
+
+PLUGIN_NAME = "astrbot_plugin_ganttknights"
+
+插件版本 = "0.1.0"
+"""与 metadata.yaml 的 version 一致（帮助页会显示它）。"""
 
 
-def main(force: bool = False, bootstrap: bool = False, 现在时间: datetime | None = None) -> None:
-    """CLI 编排：先按"每天只做一次"决定是否更新数据与新增预告，再渲染。
+class GanttKnightsPlugin(Star):
+    """指令 + 生命周期；渲染细节全部委托给 `渲染服务`。"""
 
-    时间在每次调用时求值：CLI 下与模块导入时刻等价，
-    但在长驻进程（AstrBot 插件）里必须是"本次调用"的时间。
-    """
-    现在时间 = 现在时间 or datetime.now()
-    现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
+    def __init__(self, context: Context, config: AstrBotConfig | None = None):
+        super().__init__(context)  # 注意：config 不走 super()，自己存
+        # 只有存在 _conf_schema.json 时 AstrBot 才传 config；取不到就退回全默认值，
+        # 不让一个加载期 TypeError 把插件整个毙掉（§9 版本敏感点）。
+        self.config: AstrBotConfig | dict = config if config is not None else {}
+        self.plugin_dir = Path(__file__).resolve().parent
 
-    # 第 1 步：获取最新活动数据（每天只爬一次，--force 可强制重新爬取）
-    if not force and 今天写过(Path(settings.all_data_path), 现在时间):
-        logger.info("今天已爬取过，跳过更新（--force 可强制更新）")
-    else:
-        更新数据(现在字符串, 回溯已结束=bootstrap)
+        # 官方 storage 写法：get_astrbot_data_path() + plugin_data/<插件名>。
+        # 插件名优先用 AstrBot 注入的 self.name，取不到时回落常量（§5.3）。
+        插件名 = getattr(self, "name", None) or PLUGIN_NAME
+        self.data_dir = Path(get_astrbot_data_path()) / "plugin_data" / 插件名
 
-    # 第 2 步：新增预告（凭证/时装/模组）与活动数据各管各的新鲜度
-    # —— 活动数据当天已爬过时，预告仍要确认是今天的，否则底栏会整区缺失
-    if not force and 今天写过(Path(settings.new_items_path), 现在时间):
-        logger.info("今天已更新过新增预告，跳过")
-    else:
+        self.渲染 = 渲染服务(插件目录=self.plugin_dir, 数据目录=self.data_dir)
+        # 构造期只准备缓存目录与环境变量，不 import matplotlib（那会阻塞加载 1s 以上）
+        self.mplconfig_dir = self.渲染.准备matplotlib环境()
+
+    async def initialize(self) -> None:
+        """插件激活：只建目录、记日志——爬取与渲染都推迟到指令触发时。"""
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "罗德岛甘特图已加载：插件目录 %s｜数据目录 %s｜matplotlib 缓存 %s",
+            self.plugin_dir,
+            self.data_dir,
+            self.mplconfig_dir,
+        )
+
+    async def terminate(self) -> None:
+        """插件禁用/重载：阶段三没有后台任务与调度器（阶段五才加），只丢弃复用中的结果。"""
+        self.渲染.清理复用()
+        logger.info("罗德岛甘特图已卸载。")
+
+    # ==================== 指令 ====================
+
+    @filter.command(甘特图命令.name, alias=甘特图命令.alias_set)
+    async def 出图(self, event: AstrMessageEvent):
+        """生成明日方舟近期活动甘特图长图。"""
+        现在时间 = datetime.now()
+        运行配置 = 读取配置(self.config)
         try:
-            更新增预告(现在时间, 现在字符串)
+            素材缺失 = self.渲染.素材问题(运行配置)
+            if 素材缺失 is not None:
+                yield event.plain_result(文案.缺背景图.format(目录=素材缺失))
+                return
+
+            结果 = self.渲染.取复用(现在时间, 运行配置)
+            if 结果 is None:
+                # 未命中：先说话再出图（渲染可能要几十秒，尤其是首次爬数据）
+                需要更新 = self.渲染.需要每日更新(现在时间, 运行配置)
+                yield event.plain_result(文案.更新数据中 if 需要更新 else 文案.渲染中)
+                结果 = await self.渲染.出图(
+                    现在时间=现在时间,
+                    运行配置=运行配置,
+                    自动更新=需要更新,
+                )
+
+            图片 = Path(结果.图片路径)
+            if not 图片.exists() or 图片.stat().st_size == 0:
+                # render_once() 内部会吞掉绘制异常（只记日志），这里补一次显式判断
+                yield event.plain_result(文案.渲染失败)
+                return
+            yield event.image_result(str(图片))
         except Exception:
-            logger.exception("新增预告获取失败")
+            logger.exception("生成甘特图失败")
+            yield event.plain_result(文案.渲染失败)
 
-    # 第 3~6 步交给流水线：过滤 → 主题 → 渲染 → 警告
-    结果 = render_once(
-        现在时间=现在时间,
-        强制刷新=False,          # 数据新鲜度已在上两步判定
-        控制台打印警告=True,     # CLI 把警告打到 stdout
-    )
-    return 结果
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="明日方舟近期活动甘特图生成工具")
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="强制重新爬取数据（忽略'今天已爬取过'检查）",
-    )
-    parser.add_argument(
-        "--bootstrap",
-        action="store_true",
-        help="回溯已结束活动的公告，补录剿灭/保全等长期任务（数据初次建立时跑一次即可，需配合 --force）",
-    )
-    args = parser.parse_args()
-    setup_logging()
-    main(force=args.force, bootstrap=args.bootstrap)
+    @filter.command(帮助命令.name, alias=帮助命令.alias_set)
+    async def 帮助(self, event: AstrMessageEvent):
+        """查看本插件全部指令。"""
+        yield event.plain_result(生成帮助文本(插件版本))

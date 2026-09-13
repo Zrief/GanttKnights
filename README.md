@@ -7,13 +7,20 @@
 ## 使用
 
 ```bash
-uv sync          # 或 pip install httpx matplotlib pandas Pillow numpy
+uv sync          # 或 pip install httpx matplotlib Pillow numpy
 
-python main.py                       # 生成 Gantt.jpg（数据每天只爬一次）
-python main.py --force               # 强制重新爬取
-python main.py --bootstrap --force   # 数据初次建立：回溯已结束活动的公告，补录剿灭/保全等长期任务
+python cli.py                        # 生成 Gantt.jpg（数据每天只爬一次）
+python cli.py --force                # 强制重新爬取
+python cli.py --bootstrap --force    # 数据初次建立：回溯已结束活动的公告，补录剿灭/保全等长期任务
 python prts_scraper.py               # 只爬取活动数据并在控制台打印
 ```
+
+## AstrBot 插件
+
+`main.py` 是 AstrBot 插件入口（聊天指令出图），`cli.py` 是命令行入口，两者共用 `src/流水线.py` 这一条渲染内核。
+
+把仓库放进 `data/plugins/astrbot_plugin_ganttknights/`（目录名须与 `metadata.yaml` 的 `name` 一致），
+依赖由 AstrBot 按 `requirements.txt` 安装，然后在群里发 `/甘特图`。指令与配置见 `docs/插件化路线.md`。
 
 数据全部来自 [PRTS Wiki](https://prts.wiki)：SMW ask 查活动时间、卡池一览与活动公告的 wikitext 解析卡池和子活动，需要网络。
 
