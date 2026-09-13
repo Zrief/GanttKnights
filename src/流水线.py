@@ -109,8 +109,16 @@ def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> None:
     活动列表 = 去重排序(活动列表)
 
     if 活动列表:
-        合并保存CSV(活动列表, settings.all_data_path, 现在字符串)
-        logger.info("数据更新完成，共 %d 条活动", len(活动列表))
+        from .数据保护 import 数据保护拦截
+
+        try:
+            合并保存CSV(活动列表, settings.all_data_path, 现在字符串)
+        except 数据保护拦截 as exc:
+            # 护栏拦下了本次写回（原文件未动）。最常见原因是"现在时间"比数据新，
+            # 例如调试时注入了基准时间。这里只告警，不中断后续渲染。
+            logger.error("活动数据未写回，已保留原文件：%s", exc)
+        else:
+            logger.info("数据更新完成，共 %d 条活动", len(活动列表))
     else:
         logger.warning("未获取到有效活动")
 

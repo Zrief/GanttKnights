@@ -7,6 +7,8 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from .数据保护 import 校验写回
+
 logger = logging.getLogger("src.汇总")
 
 # store 里过期超过这个天数的条目自动清理
@@ -90,12 +92,22 @@ def _卡池合并key(条目: dict) -> str:
     return 条目["名称"]
 
 
-def 合并保存CSV(新活动列表: list[dict], 输出路径: str | Path, 现在时间: str) -> str:
+def 合并保存CSV(
+    新活动列表: list[dict],
+    输出路径: str | Path,
+    现在时间: str,
+    允许大幅清理: bool = False,
+) -> str:
     """增量保存：读已有数据 + 新数据覆盖 + 清理过期条目 + 写回
 
     store 带"来源"列（条目出自哪个活动公告；卡池和 API 兜底条目为空）。
     来源非空说明该公告解析成功过，主流程据此跳过重复解析——公告里的
     剿灭/保全等长期任务因此只解析一次就能一直保留到过期。
+
+    注意 现在时间 不只用于记录，它还推导清理线（`现在时间 - 过期保留天数`），
+    因此传错时间会静默丢数据。写回前由 `数据保护.校验写回` 兜一道：
+    若本次会把已有数据清空、或清理比例过高，则抛 `数据保护拦截` 且**不写盘**。
+    确实需要大清理时显式传 `允许大幅清理=True`。
     """
     路径 = Path(输出路径)
     字段 = ["名称", "开始时间", "结束时间", "类型", "来源"]
@@ -116,6 +128,9 @@ def 合并保存CSV(新活动列表: list[dict], 输出路径: str | Path, 现�
                     "来源": row.get("来源", ""),
                 }
 
+    # 合并进新数据之前先记下"原文件里实际有几条"，供护栏判断丢失幅度
+    原有条数 = len(已有)
+
     for a in 新活动列表:
         已有[_卡池合并key(a)] = {
             "名称": a["名称"],
@@ -132,6 +147,14 @@ def 合并保存CSV(新活动列表: list[dict], 输出路径: str | Path, 现�
     删了 = len(已有) - len(所有)
     if 删了:
         logger.info("  清理过期条目 %d 条（结束时间早于 %s）", 删了, 清理线)
+
+    if not 允许大幅清理:
+        校验写回(原有条数, len(所有))
+    elif 原有条数 and len(所有) * 2 < 原有条数:
+        logger.warning(
+            "  大幅清理已放行：%d 条 → %d 条（调用方显式传了 允许大幅清理=True）",
+            原有条数, len(所有),
+        )
 
     所有.sort(key=lambda e: e["开始时间"])
     with open(路径, "w", newline="", encoding="utf-8-sig") as f:
