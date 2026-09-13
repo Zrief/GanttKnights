@@ -10,23 +10,27 @@
 3. **签名缓存**（阶段四，取代阶段三的"复用窗口"）：判定与落盘全在 `插件/缓存.py`；
    本模块负责"先刷新数据、再定背景、再算签名"的顺序——**顺序不能反**，
    因为数据内容与背景图片文件都是签名的一部分。
-4. **固定交付路径**：无论新画还是命中缓存，都往 `settings.output_path` 落一份
-   （README 与人工调试都认这个固定路径），警告文件也同步刷新。
+4. **交付**：发出去的是 `渲染缓存/渲染_<签名>.jpg` 那张**按签名命名、写完就不再改**的图；
+   另用原子替换同步一份到 `settings.output_path`（`Gantt.jpg`，给人看 / 给 README），
+   警告文件也同步刷新。不把发送路径指向 `Gantt.jpg`：宿主是在**发送那一刻**才把本地文件
+   读成 base64 的，而 `Gantt.jpg` 会被后续请求覆盖 → 并发时可能发出"别人的图"或半张图。
 5. **Agg 后端 + 可写 MPLCONFIGDIR**：插件环境没有显示器，且默认缓存目录在容器/只读环境里
    不可写。MPLCONFIGDIR 必须在 matplotlib **首次导入之前**设好，所以路径准备在
    `准备matplotlib环境()`（构造期调用，只设环境变量），`use("Agg")` 在工作线程里执行。
 
-### 随机背景 × 缓存
+### 随机背景 × 缓存：按自然日确定性抽签
 
-背景**先选后算签名**：选中的那张图（路径 + 大小 + mtime）进签名（§7）。
-于是「随机背景」开着时，同一天里重复出图的表现是：
+`_背景路径()` 不是每次请求都 `random.choice`，而是 **`候选[crc32(日期) % 张数]`**——
+同一天恒定抽到同一张，换一天才换。三个好处（2026-09-14 审查 + 讨论）：
 
-* 抽到没画过的背景 → 画一张并缓存（这就是"换背景"的观感）；
-* 抽到已经画过的背景且数据没变 → 直接发那张缓存图（不重画）。
+* **预判与真判定永远一致**：`查现成图()` 与锁内的 `_同步出图()` 拿到的是同一张背景，
+  于是"不发请稍候"的请求不会突然静默渲染 1.3s（审查实测：每次重抽时 8 张背景会分叉 4/40，
+  最坏接近 (k−1)/k）；
+* **同一天只有一张图**：缓存语义从"每天最多 k 张"收敛成"每天 1 张（数据/配置不变时）"；
+* **不再复读**：随机重抽时"连发两次得到同一张图"很常见，按日抽签下"换一张"就是换一天。
 
-即"每天最多画『背景张数』张"，而不是"每次请求都重画"。打包只带两张示例背景，
-所以正常最多 2 张/天；要每次都换，就把背景目录放多几张，或用 `background_file` 固定一张。
-这也意味着单飞锁只保证"同一背景不会同时画两张"——不同背景各画一张是**有意义的差异**，不算白工。
+代价：用户没法靠"再发一次"换背景（想换就改 `background_file` 指定一张，或换一天再看）。
+真正"每次都要新图"的语义留给将来的 `/甘特图换背景`。
 """
 
 from __future__ import annotations
@@ -34,9 +38,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
 import shutil
-from dataclasses import fields, replace
+import tempfile
+import zlib
+from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 
@@ -151,14 +156,16 @@ class 渲染服务:
     def 查现成图(self, 现在时间: datetime, 运行配置: 运行配置) -> bool:
         """**只**用来决定要不要先发一句"请稍候"：只读盘、不写盘、不取锁。
 
-        真正的判定在 `出图()` 的锁内重做一次。这里说"有"却因并发或随机背景落空，
-        代价只是少一句话；说"没有"而实际命中，代价只是多一句话——都不影响正确性。
+        真正的判定在 `出图()` 的锁内重做一次。背景按自然日确定性抽签（`_背景路径()`），
+        所以这里的"抽到哪张"与锁内那次**必然相同**——不会出现"预判说有、实际却静默渲染"
+        （审查实测过每次重抽的版本：8 张背景 40 次请求分叉 4/40）。
+        剩下的分叉余地只有"两次调用之间数据被别的请求改了"，那本来也该重画。
         """
         try:
             设置 = self.内核设置(运行配置)      # 只读，不改全局 settings
             if 运行配置.每日自动更新 and any(self._新鲜度(现在时间, 设置)):
                 return False            # 马上要联网刷新数据 → 现有缓存多半会作废
-            背景路径 = self._背景路径(运行配置, 设置)
+            背景路径 = self._背景路径(运行配置, 设置, 现在时间)
             if 背景路径 is None:
                 return False
             签名 = self.缓存.算签名(运行配置, 现在时间, 设置, 背景路径)
@@ -209,20 +216,26 @@ class 渲染服务:
         if 自动更新 or 强制刷新:
             self._刷新数据(现在时间, 现在字符串, 设置, 强制=强制刷新)
 
-        # ② 定下"用哪张背景"：它既决定整套配色，也是签名的一部分（§7）
-        背景路径 = self._背景路径(运行配置, 设置)
+        # ② 收拾一下缓存目录：过期条目 / 损坏图片 / 没人认领的散图（只在锁内、出图路径上做）
+        try:
+            self.缓存.清理(现在时间)
+        except Exception:
+            logger.exception("清理渲染缓存失败（不影响本次出图）")
+
+        # ③ 定下"用哪张背景"：它既决定整套配色，也是签名的一部分（§7）
+        背景路径 = self._背景路径(运行配置, 设置, 现在时间)
         if 背景路径 is None:
             raise RuntimeError(f"背景图目录里没有可用图片：{设置.bg_dir}")
 
-        # ③ 算签名 → 查缓存
+        # ④ 算签名 → 查缓存
         签名 = self.缓存.算签名(运行配置, 现在时间, 设置, 背景路径)
         if not 强制刷新:
             条目 = self.缓存.查(签名, 现在时间)
             if 条目 is not None:
                 logger.info("命中渲染缓存（生成于 %s）：%s", 条目.生成时刻, 条目.图片)
-                return self._交付(Path(条目.图片), self._结果自条目(条目), 设置)
+                return self._交付(self._结果自条目(条目), 设置)
 
-        # ④ 真画一张：直接画进缓存目录，校验魔数完整后再登记、再交付
+        # ⑤ 真画一张：直接画进缓存目录，校验魔数完整后再登记、再交付
         缓存图 = self.缓存.图片路径(签名)
         结果 = render_once(
             现在时间=现在时间,
@@ -237,8 +250,13 @@ class 渲染服务:
         if not 图是完整的(缓存图):
             logger.error("渲染未产出完整图片，按失败处理：%s", 缓存图)
             return 结果        # 入口层会报"渲染失败"，不会把这张图发出去
-        self.缓存.存入(签名, 结果, 现在时间)
-        return self._交付(缓存图, 结果, 设置)
+        try:
+            self.缓存.存入(签名, 结果, 现在时间)
+        except OSError:
+            # 缓存写不进去（磁盘满/只读/被占）不该毁掉一张**已经画好且完整**的图：
+            # 记录一句，照常交付（2026-09-14 审查实测过这条失败路径）
+            logger.exception("写入渲染缓存失败（不影响本次交付）：%s", 缓存图)
+        return self._交付(结果, 设置)
 
     def _刷新数据(self, 现在时间: datetime, 现在字符串: str,
                   设置: Settings, *, 强制: bool) -> None:
@@ -252,26 +270,54 @@ class 渲染服务:
             except Exception:
                 logger.exception("新增预告获取失败（沿用上次数据）")
 
-    def _交付(self, 图: Path, 结果: 渲染结果, 设置: Settings) -> 渲染结果:
-        """把要发的图复制到 `settings.output_path`，并同步警告文件。
+    def _交付(self, 结果: 渲染结果, 设置: Settings) -> 渲染结果:
+        """把产物同步一份到 `settings.output_path`，并刷新警告文件；**返回原结果**。
 
-        命中缓存也走这里：否则 `Gantt.jpg` 会停在上一次的内容，README 引用与人工调试都失真。
+        发出去的一直是 `结果.图片路径`——命中缓存时是缓存图，新画时也是缓存图（都是
+        `渲染缓存/渲染_<签名>.jpg`，写完就不再改）。`Gantt.jpg` 只是给人看/给 README 的
+        副本：宿主在**发送那一刻**才读文件成 base64，把发送路径指向会被后续请求覆盖的
+        `Gantt.jpg`，并发时就可能发出"别人的图"或半张图（审查建议 4 + 讨论 D4）。
+
+        两步都是"尽力而为"：复制/写警告失败只记日志，不影响这次把图发出去。
         """
         目标 = Path(设置.output_path)
+        来源 = Path(结果.图片路径)
         try:
-            if 图.resolve() != 目标.resolve():
-                目标.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(图, 目标)
-            交付路径 = 目标
+            if 来源.resolve() != 目标.resolve():
+                自建 = self._同步一份(来源, 目标)
+                logger.info("产物已同步到 %s（%s）", 目标, "新写" if 自建 else "校验后跳过")
         except OSError:
-            logger.exception("复制到 %s 失败，改为直接发缓存里的图", 目标)
-            交付路径 = 图
+            logger.exception("同步产物到 %s 失败（不影响发图）", 目标)
         try:
             if 结果.警告:
                 Path(设置.warning_path).write_text(结果.警告, encoding="utf-8")
         except OSError:
             logger.exception("写入警告文件失败：%s", 设置.warning_path)
-        return replace(结果, 图片路径=交付路径)
+        return 结果
+
+    @staticmethod
+    def _同步一份(来源: Path, 目标: Path) -> bool:
+        """把 `来源` 原子地写成 `目标`（同目录临时文件 + `os.replace`）。
+
+        非原子的 `copyfile` 会被"发送那一刻才读文件"的宿主读到半张 JPEG；
+        内容已相同则跳过（省一次 300KB 写盘）。返回是否真的写了。
+        """
+        if 目标.exists() and 目标.stat().st_size == 来源.stat().st_size:
+            旧 = 目标.read_bytes()
+            if 旧 == 来源.read_bytes():
+                return False
+        目标.parent.mkdir(parents=True, exist_ok=True)
+        fd, 临时 = tempfile.mkstemp(dir=str(目标.parent), prefix=".gantt-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as 出:
+                with 来源.open("rb") as 入:
+                    shutil.copyfileobj(入, 出)
+                os.fsync(出.fileno())
+            os.replace(临时, 目标)
+        finally:
+            if os.path.exists(临时):
+                os.unlink(临时)
+        return True
 
     @staticmethod
     def _结果自条目(条目: 缓存条目) -> 渲染结果:
@@ -294,12 +340,13 @@ class 渲染服务:
         matplotlib.use("Agg", force=True)
 
     @staticmethod
-    def _背景路径(运行配置: 运行配置, 设置: Settings) -> str | None:
+    def _背景路径(运行配置: 运行配置, 设置: Settings, 现在时间: datetime) -> str | None:
         """定下这次用哪张背景图（**一定是具体路径**，签名要用它；目录空则 None）。
 
         - 指定了文件名/绝对路径 → 用它；
-        - 否则开随机 → 在背景目录里随机抽一张；
-        - 否则固定取目录里第一张（出图可复现，缓存也稳）。
+        - 否则开随机 → 按**自然日**确定性抽签：`候选[crc32(日期) % 张数]`
+          （同一天恒定同一张，见模块 docstring 的三条理由）；
+        - 否则固定取目录里第一张（出图可复现）。
         """
         if 运行配置.指定背景:
             指定 = Path(运行配置.指定背景)
@@ -307,4 +354,7 @@ class 渲染服务:
         候选 = sorted(p for p in Path(设置.bg_dir).glob("*") if p.is_file())
         if not 候选:
             return None
-        return str(random.choice(候选) if 运行配置.随机背景 else 候选[0])
+        if not 运行配置.随机背景:
+            return str(候选[0])
+        种子 = zlib.crc32(现在时间.date().isoformat().encode("utf-8"))
+        return str(候选[种子 % len(候选)])

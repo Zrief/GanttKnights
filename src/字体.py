@@ -106,6 +106,35 @@ class 字体方案:
 
 
 _方案: 字体方案 | None = None
+_方案指纹: tuple | None = None
+
+
+def 字体指纹() -> tuple:
+    """会改变"用哪支字体"的全部输入 —— 供 `注册字体()` 判断缓存是否还有效。
+
+    只 `stat` 不读内容：字体文件动辄 20MB，每次出图做内容哈希不划算，而"换字体"
+    必然改大小或 mtime（`size` + `mtime_ns` 与 `绘图_图表` / `绘图_主题` 的指纹同一口径）。
+
+    为什么需要它：`_方案` 是**进程级**缓存，而 AstrBot 的"禁用插件→启用插件"不会重载
+    已 import 的模块。没有这层指纹时，用户在长驻进程里往 `data/font.ttf`（插件唯一的
+    自定义字体入口）或 `字体/` 里放字体**永远不会生效**，只能重启 AstrBot——
+    2026-09-14 的对抗性审查实测到了这一点（同进程加入后仍是系统字体，独立进程则生效）。
+    """
+    条目: list[str] = [str(settings.font_path), settings.font_family]
+    try:
+        目录 = 取字体目录()
+        条目.append(str(目录))
+        条目 += sorted(f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}"
+                       for p in 目录.iterdir() if p.is_file())
+    except OSError:
+        条目.append("字体目录读不到")
+    for 角色, 路径 in sorted((settings.额外字体 or {}).items()):
+        try:
+            st = Path(路径).stat()
+            条目.append(f"{角色}:{路径}:{st.st_size}:{st.st_mtime_ns}")
+        except OSError:
+            条目.append(f"{角色}:{路径}:缺")
+    return tuple(条目)
 
 
 def _解析文件(家族: str, 字重: str = "normal") -> str | None:
@@ -184,11 +213,22 @@ def _装自定义字体() -> tuple[dict[str, str], str]:
     return 自定义, ("自定义" if 自定义 else "")
 
 
-def 注册字体() -> 字体方案:
-    """注册所有可用字体源 → 挑出角色字体 → 应用到 rcParams（幂等，结果缓存）"""
-    global _方案
-    if _方案 is not None:
+def 注册字体(强制: bool = False) -> 字体方案:
+    """注册所有可用字体源 → 挑出角色字体 → 应用到 rcParams。
+
+    结果按 `字体指纹()` 缓存：指纹不变就直接返回，指纹变了（用户往 `字体/` 或
+    `data/font.ttf` 放了/换了字体）就重新解析 —— 长驻进程里这才让"换字体"可见。
+
+    已知边界：matplotlib 的字体表**只增不减**，所以"删掉字体文件"在本进程内仍会解析到
+    那条旧记录（指向已不存在的路径的可能），要彻底收敛得重启；同名同字重的**不同文件**
+    相争时，`findfont` 平分取先注册的，也可能仍落到旧的。这两条都只在"删/换同名家族"时出现。
+    """
+    global _方案, _方案指纹
+    指纹 = 字体指纹()
+    if _方案 is not None and not 强制 and 指纹 == _方案指纹:
         return _方案
+    if _方案 is not None:
+        logger.info("字体来源发生变化，重新解析字体")
 
     字体目录 = 取字体目录()
     随包可用 = [名 for 名 in 字体表 if (字体目录 / 名).exists()]
@@ -222,6 +262,7 @@ def 注册字体() -> 字体方案:
     # （那支多半是可变字体，默认实例只有 ExtraLight(200)）。
     plt.rcParams["font.serif"] = [_方案.无衬线族]
     plt.rcParams["axes.unicode_minus"] = False
+    _方案指纹 = 指纹
 
     logger.info(
         "字体来源 %s：正文 %s（%s）｜等宽 %s（%s）｜真粗体 %s",

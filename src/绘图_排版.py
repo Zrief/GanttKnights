@@ -44,7 +44,7 @@ from .config import settings
 from .绘图_图表 import 缩放图片
 from .绘图_颜色 import set_alpha_channel
 from .绘图_主题 import 主题
-from .字体 import 注册字体
+from .字体 import 注册字体, 字体指纹
 
 logger = logging.getLogger(__name__)
 
@@ -70,24 +70,29 @@ logger = logging.getLogger(__name__)
 # 注册前先按"无真粗体"处理：粗体() 会据此走同色描边兜底。
 真粗体 = False
 粗字重 = "normal"
-_字体就绪 = False
+_字体指纹: tuple | None = None
 
 
 def _确保字体就绪() -> None:
-    """首次出图时注册字体并落地角色字体（幂等）。
+    """出图前注册字体并落地角色字体（按"字体来源指纹"幂等）。
 
     必须在真正画字之前调用：matplotlib 在 draw 时按 family 名解析字体，
     仅设置 rcParams 而不注册文件是找不到 字体/ 下那几支静态字重的。
+
+    判据用 `字体.字体指纹()` 而不是一个一次性布尔：AstrBot 是长驻进程，
+    "禁用/启用插件"不会重载模块，用一次性布尔会让"往 `data/font.ttf` 或 `字体/`
+    放字体"在本次进程内**永远不生效**（2026-09-14 审查实测）。指纹变了就重解析。
     """
-    global _字体就绪, 标题族, 等宽, 真粗体, 粗字重
-    if _字体就绪:
+    global _字体指纹, 标题族, 等宽, 真粗体, 粗字重
+    指纹 = 字体指纹()
+    if _字体指纹 == 指纹:
         return
     方案 = 注册字体()
     标题族 = 方案.无衬线族
     等宽 = 方案.等宽族
     真粗体 = 方案.真粗体
     粗字重 = "bold" if 真粗体 else "normal"
-    _字体就绪 = True
+    _字体指纹 = 指纹
 
 
 def 粗体(色: str, 粗细: float = 0.9):
