@@ -271,13 +271,13 @@ def render_once(
     左边界 = 今天 - timedelta(days=settings.left_offset_days)
     右边界 = 今天 + timedelta(days=settings.right_offset_days - 今天.weekday())
 
-    df = preprocess_data(
+    记录 = preprocess_data(
         all_data_path=settings.all_data_path,
         now=今天,
         left_border=左边界,
         right_border=右边界,
     )
-    if df.empty:
+    if not 记录:
         logger.warning("没有即将开始或进行中的活动，请更新数据源。")
 
     # 背景图 → 整套配色由这一张图推导
@@ -295,7 +295,7 @@ def render_once(
     概况 = ""
     try:
         概况 = 绘制甘特图(
-            输出, 分区, df, 主题, 左边界, 右边界, 背景, 现在时间, 标题=标题,
+            输出, 分区, 记录, 主题, 左边界, 右边界, 背景, 现在时间, 标题=标题,
         )
         logger.info("图表已保存至 %s（%s）", 输出, 概况)
     except Exception:
@@ -304,7 +304,7 @@ def render_once(
     # 过期警告
     警告 = ""
     try:
-        警告 = 生成警告(df, 提醒天数=提醒天数, 新增内容=新增内容)
+        警告 = 生成警告(记录, 提醒天数=提醒天数, 新增内容=新增内容)
         if not 警告:
             警告 = "博士，罗德岛当前所有行动均在正常排期内，无需提醒。"
         if 控制台打印警告:
@@ -321,7 +321,7 @@ def render_once(
         概况=概况,
         警告=警告,
         标题=标题,
-        条目数=int(len(df)),
+        条目数=len(记录),
         名称数=sum(len(新增内容.get(k) or []) for k in _WARN_SECTIONS),
         分区计数={区名: len(条目们) for 区名, 条目们 in 分区},
     )

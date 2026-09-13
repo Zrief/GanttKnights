@@ -19,7 +19,7 @@
 明度梯度（深底/面板/文字/强调）是固定规范，于是每张背景图自动得到自己的主体色系，
 事件类型与底栏分区分取同一条强调色阶的不同档位。
 
-本模块只负责排版与绘制：数据（df / 分区 / 主题 / 时间窗）全部由 main.py 传入。
+本模块只负责排版与绘制：数据（记录列表 / 分区 / 主题 / 时间窗）全部由调用方传入。
 """
 
 from __future__ import annotations
@@ -333,7 +333,7 @@ def 填页眉(ax, fig, 主题: 主题, 现在: datetime, 标题: str = 图标题
 
 # ============================ 甘特图 ============================
 
-def 填甘特区(ax, fig, df, 主题: 主题, 左边界: datetime, 右边界: datetime,
+def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界: datetime,
             现在: datetime) -> None:
     """整幅绘图区 + 顶部日期轴带 + 每日竖网格 + TODAY 通栏线；
     事件名写在条上（沿用原版做法），条太短放不下时用箭头引到条外"""
@@ -355,10 +355,10 @@ def 填甘特区(ax, fig, df, 主题: 主题, 左边界: datetime, 右边界: da
     def x(小时: float) -> float:
         return 甘特左列px + 小时 / 总小时 * 绘图宽px
 
-    显示 = df.iloc[::-1].reset_index(drop=True)   # 倒序：卡池在上、长期在下（沿用原图观感）
+    显示 = list(reversed(记录))   # 倒序：卡池在上、长期在下（沿用原图观感）
     弧度 = 类型弧度表()
     名字号 = 15
-    类们 = [int(类) for 类 in 显示["类型"]]
+    类们 = [条目.类型 for 条目 in 显示]
 
     # 同类型连续的行归为一个功能块，块内给左列一条色轨、块间加分隔线，
     # 这样即使四个类型的颜色相近，也能一眼看出分组边界
@@ -397,10 +397,10 @@ def 填甘特区(ax, fig, df, 主题: 主题, 左边界: datetime, 右边界: da
                            alpha=0.16, edgecolor="none", zorder=1.5))
 
     # 行
-    for i, (_, 行) in enumerate(显示.iterrows()):
-        名 = str(行["名称"])
-        始, 终 = 行["开始时间"], 行["结束时间"]
-        类 = int(行["类型"])
+    for i, 条目 in enumerate(显示):
+        名 = 条目.名称
+        始, 终 = 条目.开始, 条目.结束
+        类 = 条目.类型
         条色 = 主题.大色块(弧度.get(类, 0.0))
         y顶 = 顶 - i * 甘特行高px
         y底 = y顶 - 甘特行高px
@@ -597,7 +597,7 @@ def 建分区(新增: dict) -> list[tuple[str, list[dict]]]:
     return 分区
 
 
-def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]]], df,
+def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]]], 记录,
               主题: 主题, 左边界: datetime, 右边界: datetime,
               背景路径: str | Path, 现在: datetime,
               标题: str = 图标题) -> str:
@@ -605,9 +605,9 @@ def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]
     _确保字体就绪()
     有效 = [(区名, 条目们) for 区名, 条目们 in 分区 if 条目们]
     行们, 格宽px = 选版面(有效)
-    fig, gs, ax_页眉, ax_chart = 建分区画布(len(df), len(行们), 主题, 背景路径)
+    fig, gs, ax_页眉, ax_chart = 建分区画布(len(记录), len(行们), 主题, 背景路径)
     填页眉(ax_页眉, fig, 主题, 现在, 标题)
-    填甘特区(ax_chart, fig, df, 主题, 左边界, 右边界, 现在)
+    填甘特区(ax_chart, fig, 记录, 主题, 左边界, 右边界, 现在)
     for r, 行 in enumerate(行们):
         填行(行轴(fig, gs, r), fig, 行, 格宽px, 主题)
     目标 = Path(输出路径)

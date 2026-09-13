@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-import pandas as pd
+from .活动 import 活动
 
 type 图标表 = dict[int, str]
 
@@ -13,7 +13,7 @@ type 图标表 = dict[int, str]
 
 
 def 生成警告(
-    df: pd.DataFrame,
+    记录: list[活动],
     提醒天数: int = 3,
     紧急天数: int = 1,
     新增内容: dict | None = None,
@@ -21,7 +21,7 @@ def 生成警告(
     """生成过期警告文本。
 
     参数:
-        df: 经过 preprocess_data 过滤后的活动 DataFrame
+        记录: 经过 preprocess_data 过滤后的活动列表（list[活动]）
         提醒天数: 多少天内过期就提醒
         紧急天数: 当天内过期标为紧急
         新增内容: 首页解析出的新增时装/模组（{"时装": [...], "模组": [...]}）
@@ -31,37 +31,28 @@ def 生成警告(
     """
     段 = _新增段落(新增内容 or {})
 
-    if df.empty:
+    if not 记录:
         return "\n".join(段)
 
     now = datetime.now()
     now_date = now.date()
-    截止日期 = now + pd.Timedelta(days=提醒天数)
+    截止日期 = now + timedelta(days=提醒天数)
 
-    # 筛选将要过期的活动
-    col_end = df.columns[2]
-    col_type = df.columns[3]
-    col_name = df.columns[0]
-
-    mask = (df[col_end] > now) & (df[col_end] <= 截止日期)
-    警告df = df[mask].copy()
-
-    # 按结束时间排序（最紧急的在前）
-    警告df = 警告df.sort_values(by=col_end)
+    # 筛选将要过期的活动，按结束时间排序（最紧急的在前）
+    警告们 = sorted(
+        (e for e in 记录 if now < e.结束 <= 截止日期),
+        key=lambda e: e.结束,
+    )
 
     紧急行: list[str] = []
     普通行: list[str] = []
 
-    for _, row in 警告df.iterrows():
-        name = row[col_name]
-        end_time: datetime = row[col_end]
-        atype = int(row[col_type])
+    for 条目 in 警告们:
+        icon = 类型图标.get(条目.类型, "📋")
+        tname = 类型名称.get(条目.类型, "?")
 
-        icon = 类型图标.get(atype, "📋")
-        tname = 类型名称.get(atype, "?")
-
-        剩余天数 = (end_time.date() - now_date).days
-        end_str = end_time.strftime("%m月%d日 %H:%M")
+        剩余天数 = (条目.结束.date() - now_date).days
+        end_str = 条目.结束.strftime("%m月%d日 %H:%M")
 
         if 剩余天数 == 0:
             标记 = "🔥 今天结束"
@@ -70,7 +61,7 @@ def 生成警告(
         else:
             标记 = f"剩 {剩余天数} 天"
 
-        行 = f"  {icon} [{tname}] {name}"
+        行 = f"  {icon} [{tname}] {条目.名称}"
         行 += f"\n    截止: {end_str}  {标记}"
 
         if 剩余天数 <= 紧急天数:
@@ -89,7 +80,7 @@ def 生成警告(
         段.append(f"\n{header}（{提醒天数}天内）")
         段.extend(普通行)
     if 有紧急 or 有普通:
-        段.append(f"\n⏰ 共 {len(警告df)} 项行动即将到期，博士请留意。")
+        段.append(f"\n⏰ 共 {len(警告们)} 项行动即将到期，博士请留意。")
 
     return "\n".join(段)
 
