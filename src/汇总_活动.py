@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +14,34 @@ logger = logging.getLogger("src.汇总")
 
 # store 里过期超过这个天数的条目自动清理
 过期保留天数 = 7
+
+
+@dataclass(frozen=True)
+class 合并差异:
+    """这次合并相对 CSV 里**原有内容**的变化（都放显示名，给用户看）。
+
+    为什么由合并来回答：**合并动作本身就天然知道**哪些键是新来的、哪些被覆盖改了、
+    哪些因为过了清理线被删掉——不需要事后再拿两份数据对比（用户 2026-09-14 指出的）。
+
+    ⚠️ 刻意**没有**"不再列出"这一项：抓取是增量的（公告页没变化就不再重读，
+    见 `解析_API活动._需重取公告`），所以"这次没抓到"根本推不出"源里没了"——
+    实测它会每天把只有公告才有的条目（如剿灭）误报成"不再列出"。
+    真被撤下的活动只能等它过期，由 `过期清理` 体现。
+    """
+
+    新增: tuple[str, ...] = field(default_factory=tuple)
+    改动: tuple[str, ...] = field(default_factory=tuple)
+    过期清理: int = 0
+    原有条数: int = 0
+
+    @property
+    def 有变化(self) -> bool:
+        return bool(self.新增 or self.改动 or self.过期清理)
+
+    @property
+    def 首次(self) -> bool:
+        """CSV 原本不存在 → 这不是"变化"，是"初次建立"（别报成几千条新增）"""
+        return self.原有条数 == 0
 
 
 # ---------- 商店合并 ----------
@@ -97,12 +126,11 @@ def 合并保存CSV(
     输出路径: str | Path,
     现在时间: str,
     允许大幅清理: bool = False,
-) -> str:
-    """增量保存：读已有数据 + 新数据覆盖 + 清理过期条目 + 写回
+) -> 合并差异:
+    """增量保存：读已有数据 + 新数据覆盖 + 清理过期条目 + 写回；返回本次的**合并差异**
 
     store 带"来源"列（条目出自哪个活动公告；卡池和 API 兜底条目为空）。
-    来源非空说明该公告解析成功过，主流程据此跳过重复解析——公告里的
-    剿灭/保全等长期任务因此只解析一次就能一直保留到过期。
+    来源非空说明该公告解析成功过，主流程据此知道"这组的公告读出过内容"。
 
     注意 现在时间 不只用于记录，它还推导清理线（`现在时间 - 过期保留天数`），
     因此传错时间会静默丢数据。写回前由 `数据保护.校验写回` 兜一道：
@@ -130,9 +158,17 @@ def 合并保存CSV(
 
     # 合并进新数据之前先记下"原文件里实际有几条"，供护栏判断丢失幅度
     原有条数 = len(已有)
+    原有快照 = {k: (r["名称"], r["开始时间"], r["结束时间"], r["类型"]) for k, r in 已有.items()}
 
+    清理线 = (
+        datetime.strptime(现在时间, "%Y-%m-%d %H:%M:%S") - timedelta(days=过期保留天数)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
+    本次: dict[str, tuple[str, str, str, int]] = {}
     for a in 新活动列表:
-        已有[_卡池合并key(a)] = {
+        键 = _卡池合并key(a)
+        本次[键] = (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
+        已有[键] = {
             "名称": a["名称"],
             "开始时间": a["开始时间"],
             "结束时间": a["结束时间"],
@@ -140,13 +176,25 @@ def 合并保存CSV(
             "来源": a.get("_parent", ""),
         }
 
-    清理线 = (
-        datetime.strptime(现在时间, "%Y-%m-%d %H:%M:%S") - timedelta(days=过期保留天数)
-    ).strftime("%Y-%m-%d %H:%M:%S")
     所有 = [r for r in 已有.values() if r["结束时间"] >= 清理线]
     删了 = len(已有) - len(所有)
     if 删了:
         logger.info("  清理过期条目 %d 条（结束时间早于 %s）", 删了, 清理线)
+
+    # —— 差异：这次抓取相对原有内容改了什么 ——
+    # 只算**能留下来**的行：抓取源里总会带回一堆早已结束的条目（卡池一览尤其多），
+    # 它们进来就被清理线删掉，不该每天在日差里刷一遍（实测未过滤时每天 54 条"新增"）。
+    存活键 = {k for k, r in 已有.items() if r["结束时间"] >= 清理线}
+    新增 = tuple(v[0] for k, v in 本次.items() if k in 存活键 and k not in 原有快照)
+    改动 = tuple(v[0] for k, v in 本次.items()
+                if k in 存活键 and k in 原有快照 and v != 原有快照[k])
+    # `过期清理` = **原本就在 store 里、这次没留下来**的条数（含"新时间已经过期"那种）。
+    # 不数那些抓取源每天都会带回、进来就被清理线删掉的条目（卡池一览尤其多）——
+    # 它们从没进过 store，每天报一次"清理了 53 条"纯属噪音。
+    清理了原有的 = sum(1 for k in 原有快照 if k not in 存活键)
+    if 原有条数 == 0:
+        # 首次建立没有"原有内容"可比：不该报成"新增了 300 条活动"（`首次` 标记已经说明一切）
+        新增 = 改动 = ()
 
     if not 允许大幅清理:
         校验写回(原有条数, len(所有))
@@ -161,4 +209,9 @@ def 合并保存CSV(
         writer = csv.DictWriter(f, fieldnames=字段)
         writer.writeheader()
         writer.writerows(所有)
-    return str(路径)
+
+    差异 = 合并差异(新增=新增, 改动=改动, 过期清理=清理了原有的, 原有条数=原有条数)
+    if 差异.有变化:
+        logger.info("  本次合并：新增 %d / 改动 %d / 过期清理 %d",
+                    len(新增), len(改动), 清理了原有的)
+    return 差异

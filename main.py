@@ -33,7 +33,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .插件 import 文案
 from .插件.配置 import 读取配置
-from .插件.指令 import 刷新命令, 帮助命令, 甘特图命令, 状态命令, 生成帮助文本
+from .插件.指令 import 刷新命令, 帮助命令, 甘特图命令, 状态命令, 初始化命令, 生成帮助文本
 from .插件.渲染 import 素材缺失, 渲染服务
 from .插件.推送 import 推送状态, 推送服务
 
@@ -182,6 +182,34 @@ class GanttKnightsPlugin(Star):
             logger.exception("强制刷新失败")
             yield event.plain_result(文案.渲染失败)
 
+    @filter.command(初始化命令.name, alias=初始化命令.alias_set)
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def 初始化(self, event: AstrMessageEvent):
+        """全量重建数据（管理员）：连更老的已结束活动的公告一起扫。
+
+        等价 `python cli.py --bootstrap --force`。什么时候需要：wiki 会**复用老活动页**
+        来排复刻/长期轮换，这些内容只有全量扫描才看得到（日常增量只看 90 天内结束过的事件）。
+        全新安装时插件会自动做一次，所以这条指令是"我怀疑数据不全"时的手动入口。
+        """
+        yield event.plain_result(文案.初始化中)
+        try:
+            结果 = await self.渲染.出图(
+                现在时间=datetime.now(), 运行配置=self.运行配置(),
+                自动更新=True, 强制刷新=True, 回溯已结束=True,
+            )
+            图片 = Path(结果.图片路径)
+            if not self.渲染.产物可用(图片):
+                yield event.plain_result(文案.渲染失败)
+                return
+            if 结果.变化:
+                yield event.plain_result(结果.变化)
+            yield event.image_result(str(图片))
+        except 素材缺失 as exc:
+            yield event.plain_result(文案.说明素材缺失(exc))
+        except Exception:
+            logger.exception("全量初始化失败")
+            yield event.plain_result(文案.渲染失败)
+
     @filter.command(帮助命令.name, alias=帮助命令.alias_set)
     async def 帮助(self, event: AstrMessageEvent):
         """查看本插件全部指令。"""
@@ -205,7 +233,7 @@ class GanttKnightsPlugin(Star):
             数据行 = f"{时刻:%Y-%m-%d %H:%M}（{新鲜}）"
         else:
             数据行 = "还没有数据（首次出图时抓取）"
-        快照日期 = self.渲染.上次快照日期() or "无"
+        快照日期 = self.渲染.最近变化日期() or "无"
         会话数 = len(self.推送状态.会话们())
         上次 = self.推送状态.上次()
         上次行 = ""

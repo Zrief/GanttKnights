@@ -90,19 +90,21 @@ def 读取已解析来源() -> set[str]:
     return 来源
 
 
-def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> None:
+def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> "数据变化 | None":
     """爬取 + 解析 + 合并 + 保存活动数据（不含首页新增预告）
 
+    返回**本次合并相对原有数据的变化**（`src/数据变化.py` 的 `数据变化`）——
+    "今天和昨天比变了什么"就是由合并动作本身回答的，不需要事后对比两份数据。
     首页新增预告（凭证/时装/模组）不在活动数据里，由 更新增预告() 单独按天刷新。
     """
     try:
         api原始 = 获取事件列表(settings.api_limit)
     except Exception:
         logger.exception("获取事件列表失败（网络可能断开了）")
-        return
+        return None
     if not api原始:
         logger.warning("API 未返回数据")
-        return
+        return None
 
     活动列表 = API转活动列表(api原始, 现在字符串, 读取已解析来源(), 回溯已结束=回溯已结束)
 
@@ -122,15 +124,20 @@ def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> None:
         from .数据保护 import 数据保护拦截
 
         try:
-            合并保存CSV(活动列表, settings.all_data_path, 现在字符串)
+            差异 = 合并保存CSV(活动列表, settings.all_data_path, 现在字符串)
         except 数据保护拦截 as exc:
             # 护栏拦下了本次写回（原文件未动）。最常见原因是"现在时间"比数据新，
             # 例如调试时注入了基准时间。这里只告警，不中断后续渲染。
             logger.error("活动数据未写回，已保留原文件：%s", exc)
-        else:
-            logger.info("数据更新完成，共 %d 条活动", len(活动列表))
-    else:
-        logger.warning("未获取到有效活动")
+            return None
+        logger.info("数据更新完成，共 %d 条活动", len(活动列表))
+        # 合并的差异直接写成"今天的日差"（同一天第二次合并不改写），供推送/状态页稍后读取
+        from .数据变化 import 记下并取, 默认路径
+
+        return 记下并取(默认路径(settings.数据目录), 差异, 现在字符串[:10])
+
+    logger.warning("未获取到有效活动")
+    return None
 
 
 def _写新增预告(新增: dict, 现在字符串: str) -> None:
@@ -294,19 +301,17 @@ def render_once(
         except Exception:
             logger.exception("新增预告获取失败")
 
-    # 数据快照与「和上次比」的日差：每天第一次出图时冻结当天快照（见 src/活动快照.py）。
-    # 放在画图之前：即使这次绘制失败，"今天的数据长什么样"也已经记下来了。
+    # 数据日差：由上面 `更新数据()` 里的合并动作产生并落盘（同一天第二次合并不改写）。
+    # 这里只负责读出来随结果带走——CLI / 推送 / 状态页都用它。没跑过合并（数据本来就是今天的）
+    # 或今天还没合并过，就是空串，调用方据此不附文字。
     变化 = ""
     try:
-        from .活动快照 import 记录并对比
+        from .数据变化 import 读, 默认路径
 
-        日差 = 记录并对比(settings.all_data_path, Path(settings.数据目录) / "历史",
-                          现在时间.date())
-        变化 = 日差.文本()
-        if 变化:
-            logger.info("数据日差 %s", 变化)
+        记录 = 读(默认路径(settings.数据目录), 现在时间.strftime("%Y-%m-%d"))
+        变化 = 记录.文本() if 记录 is not None else ""
     except Exception:
-        logger.exception("记录/对比数据快照失败（不影响出图）")
+        logger.exception("读取数据日差失败（不影响出图）")
 
     # 按时间窗口过滤
     今天 = 现在时间.replace(hour=0, minute=0, second=0, microsecond=0)
