@@ -1,11 +1,11 @@
 name: astrbot_plugin_ganttknights
 display_name: 罗德岛甘特图
-short_desc: 明日方舟近期活动甘特图，一键出图，数据每天自动更新一次。
+short_desc: 明日方舟近期活动甘特图，一键出图，可每日定时推送。
 desc: |
   基于 PRTS Wiki 生成明日方舟近期活动甘特图长图：
   活动/卡池时间轴、凭证兑换、新增时装、新增模组一图看完。
-  指令出图；每天第一次出图时自动更新数据，之后的重复请求直接复用刚画好的图。
-  时间窗、提醒天数、背景图等可在插件配置里调整。
+  指令随时出图；可开启每日定时推送到用过的会话，并给出「今天和上次比变了什么」。
+  时间窗、底栏面板、背景图、推送时刻等可在插件配置里调整。
 version: 0.1.0
 author: Zrief
 repo: https://github.com/Zrief/GanttKnights
