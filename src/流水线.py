@@ -1,4 +1,4 @@
-"""流水线 — CLI 与 AstrBot 插件共用的渲染入口。
+﻿"""流水线 — CLI 与 AstrBot 插件共用的渲染入口。
 
 设计约束（决定这里放什么、不放什么）：
 
@@ -71,25 +71,6 @@ class 渲染结果:
 
 # ============================ 数据获取（入口层按需调用）============================
 
-def 读取已解析来源() -> set[str]:
-    """从 store 读出公告解析成功过的活动名，用于跳过重复解析"""
-    import csv
-
-    来源: set[str] = set()
-    路径 = Path(settings.all_data_path)
-    if not 路径.exists():
-        return 来源
-    try:
-        with open(路径, newline="", encoding="utf-8-sig") as f:
-            for row in csv.DictReader(f):
-                值 = (row.get("来源") or "").strip()
-                if 值:
-                    来源.add(值)
-    except Exception:
-        logger.exception("读取已解析来源失败")
-    return 来源
-
-
 def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> "数据变化 | None":
     """爬取 + 解析 + 合并 + 保存活动数据（不含首页新增预告）
 
@@ -106,7 +87,7 @@ def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> "数据
         logger.warning("API 未返回数据")
         return None
 
-    活动列表 = API转活动列表(api原始, 现在字符串, 读取已解析来源(), 回溯已结束=回溯已结束)
+    活动列表 = API转活动列表(api原始, 现在字符串, 回溯已结束=回溯已结束)
 
     活动列表 = 合并商店(活动列表)
 
@@ -275,7 +256,7 @@ def render_once(
     参数:
         现在时间      : 渲染基准时间；None 时取当前时间
         强制刷新      : True 时先重新爬取活动数据与首页新增预告
-        回溯已结束    : 传给爬虫，补录剿灭/保全等长期任务（首次建数据用）
+        回溯已结束    : 传给爬虫：True 时连更老的已结束活动的公告一起扫（初始化用）
         输出路径      : None 时用 settings.output_path
         背景路径      : None 时从 settings.bg_dir 随机取一张
         标题          : 图片主标题

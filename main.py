@@ -1,4 +1,4 @@
-"""AstrBot 插件入口 —— 明日方舟近期活动甘特图。
+﻿"""AstrBot 插件入口 —— 明日方舟近期活动甘特图。
 
 入口布局（`astrbot/core/star/star_manager.py::PluginManager._get_modules()`）：
 
@@ -193,6 +193,7 @@ class GanttKnightsPlugin(Star):
         """
         yield event.plain_result(文案.初始化中)
         try:
+            self.渲染.重建数据()      # 删掉旧 CSV 与当天日差 → 从零重建（多余/错年份的行一并清掉）
             结果 = await self.渲染.出图(
                 现在时间=datetime.now(), 运行配置=self.运行配置(),
                 自动更新=True, 强制刷新=True, 回溯已结束=True,

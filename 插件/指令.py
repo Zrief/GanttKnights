@@ -66,8 +66,9 @@ class CommandSpec:
 初始化命令 = CommandSpec(
     name="甘特图初始化",
     aliases=("甘特图全量更新",),
-    summary="全量重建数据（管理员）：连更老的已结束活动的公告一起扫，补录长期轮换与复刻排期"
-            "（等价 cli.py --bootstrap --force）；数据看着缺内容时用一次。",
+    summary="初始化数据（管理员）：扫**所有**活动的公告，补录剿灭轮换与复刻排期"
+            "（等价 cli.py --bootstrap --force；全新安装会自动做一次）。"
+            "日常只扫进行中 + 近 30 天结束过的活动，所以平时用不到它。",
     example="/甘特图初始化",
 )
 

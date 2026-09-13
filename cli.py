@@ -1,9 +1,9 @@
-"""CLI 入口 — 生成明日方舟近期活动甘特图（数据每天只爬一次）。
+﻿"""CLI 入口 — 生成明日方舟近期活动甘特图（数据每天只爬一次）。
 
 用法:
     python cli.py                       # 生成 Gantt.jpg（数据每天只爬一次）
     python cli.py --force               # 强制重新爬取
-    python cli.py --bootstrap --force   # 数据初次建立：回溯已结束活动的公告
+    python cli.py --bootstrap --force   # 初始化：全量扫所有活动的公告（含剿灭轮换、复刻排期）
 
 编排逻辑（"今天要不要爬"这类策略）在本文件；实际渲染在 src/流水线.py，
 与 AstrBot 插件入口（main.py）共用同一条流水线。
@@ -35,6 +35,8 @@ def main(force: bool = False, bootstrap: bool = False, 现在时间: datetime | 
 
     时间在每次调用时求值：CLI 下与模块导入时刻等价，
     但在长驻进程（AstrBot 插件）里必须是"本次调用"的时间。
+
+    `bootstrap` = 初始化：扫**所有**活动的公告（日常只扫进行中 + 近 30 天结束过的）。
     """
     现在时间 = 现在时间 or datetime.now()
     现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
@@ -77,7 +79,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--bootstrap",
         action="store_true",
-        help="回溯已结束活动的公告，补录剿灭/保全等长期任务（数据初次建立时跑一次即可，需配合 --force）",
+        help="初始化：连更老的已结束活动的公告一起扫，补录剿灭/保全轮换与复刻排期（数据初次建立时配合 --force 跑一次）",
     )
     args = parser.parse_args()
     setup_logging()

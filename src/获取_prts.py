@@ -1,4 +1,4 @@
-"""网络层 — 只负责发 HTTP 请求，返回原始数据"""
+﻿"""网络层 — 只负责发 HTTP 请求，返回原始数据"""
 
 from __future__ import annotations
 
@@ -102,49 +102,6 @@ def 获取公告wikitext(事件名: str) -> str | None:
 def 公告页标题(事件名: str) -> str:
     """活动公告页的页面名（`获取公告wikitext()` 与修订探测共用同一份拼接规则）"""
     return f"{事件名}/活动公告"
-
-
-def 取页面修订时间(标题们: list[str]) -> dict[str, str]:
-    """一次请求拿多份公告页的**最后修订时间**（ISO），用于"这页被追加过内容吗"。
-
-    为什么需要它：公告页会被追加（新的剿灭轮换就写在当期活动的公告页里），
-    所以"以前解析过"不等于"内容没变"。逐页重新抓取太贵（每天几十个页面），
-    而 MediaWiki 允许一次 `titles=A|B|C…`（普通用户上限 50 个）拿全部修订时间 ——
-    一次请求就能知道该抓哪几页。
-
-    返回 `{页面名: 修订时间}`；请求失败或页面不存在时**不**出现在结果里
-    （调用方据此退回"只在没解析过时才抓"的保守行为）。
-    """
-    结果: dict[str, str] = {}
-    if not 标题们:
-        return 结果
-    for i in range(0, len(标题们), 50):
-        批 = 标题们[i:i + 50]
-        # ⚠️ 多标题查询**不能**带 rvlimit（MediaWiki 报 invalidparammix：
-        # "titles … may only be used on a single page"）。不带就默认每页取最新一条。
-        resp = 请求(PRTS_API, params={
-            "action": "query",
-            "format": "json",
-            "formatversion": "2",
-            "prop": "revisions",
-            "rvprop": "timestamp",
-            "titles": "|".join(批),
-        })
-        if resp is None:
-            continue
-        try:
-            页们 = resp.json().get("query", {}).get("pages", [])
-        except Exception:
-            logger.exception("修订时间返回体解析失败")
-            continue
-        if isinstance(页们, dict):        # 没有 formatversion 时是 {pageid: {...}}
-            页们 = list(页们.values())
-        for 页 in 页们:
-            标题 = 页.get("title")
-            修订 = (页.get("revisions") or [{}])[0].get("timestamp")
-            if 标题 and 修订:
-                结果[标题] = str(修订)
-    return 结果
 
 
 def 获取首页() -> str | None:
