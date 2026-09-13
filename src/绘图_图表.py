@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image as PILimage
 
-from src.config import settings
+from .config import settings
 
 logger = logging.getLogger(__name__)
 

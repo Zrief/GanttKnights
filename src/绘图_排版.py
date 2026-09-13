@@ -36,11 +36,11 @@ from matplotlib.patheffects import Normal, SimplePatchShadow, withStroke
 from PIL import Image as PILimage
 from PIL import ImageChops, ImageDraw
 
-from src.config import settings
-from src.绘图_图表 import 设置字体, 缩放图片
-from src.绘图_颜色 import set_alpha_channel
-from src.绘图_主题 import 主题
-from src.字体 import 字体目录, 等宽族, 衬线族, 注册字体
+from .config import settings
+from .绘图_图表 import 设置字体, 缩放图片
+from .绘图_颜色 import set_alpha_channel
+from .绘图_主题 import 主题
+from .字体 import 取字体目录, 等宽族, 衬线族, 注册字体
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +53,31 @@ logger = logging.getLogger(__name__)
 周名 = ["一", "二", "三", "四", "五", "六", "日"]
 
 # 字体：优先用 字体/ 下的静态字重（系统那支是可变字体，只能渲染最细的默认实例）
-真粗体 = 注册字体()
-衬线 = 衬线族 if (字体目录 / "NotoSerifCJKsc-Bold.otf").exists() else "Noto Serif SC"
+# ⚠️ 这里**不能在 import 期调用 注册字体()**：那会在加载模块时扫全部字重、重建
+# matplotlib 字体缓存（秒级阻塞）。作为 AstrBot 插件加载时会卡住事件循环。
+# 改为首次真正出图时再注册 —— 见 绘制甘特图() 里的 _确保字体就绪()。
+衬线 = 衬线族 if (取字体目录() / "NotoSerifCJKsc-Bold.otf").exists() else "Noto Serif SC"
 等宽 = 等宽族
-粗字重 = "bold" if 真粗体 else "normal"
+
+# 注册前先按"无真粗体"处理：粗体() 会据此走同色描边兜底。
+# 这两个值在首次出图前由 _确保字体就绪() 改写，而那一定发生在任何绘制之前。
+真粗体 = False
+粗字重 = "normal"
+_字体就绪 = False
+
+
+def _确保字体就绪() -> None:
+    """首次出图时注册字体（幂等），并据此设定真粗体 / 粗字重。
+
+    必须在真正画字之前调用：matplotlib 在 draw 时按 family 名解析字体，
+    仅设置 rcParams 而不注册文件是找不到 字体/ 下那几支静态字重的。
+    """
+    global _字体就绪, 真粗体, 粗字重
+    if _字体就绪:
+        return
+    真粗体 = 注册字体()
+    粗字重 = "bold" if 真粗体 else "normal"
+    _字体就绪 = True
 
 
 def 粗体(色: str, 粗细: float = 0.9):
@@ -581,6 +602,7 @@ def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]
               背景路径: str | Path, 现在: datetime,
               标题: str = 图标题) -> str:
     """搜索底栏版面 → 建画布 → 画页眉/甘特/底栏 → 存图；返回版面概况"""
+    _确保字体就绪()
     有效 = [(区名, 条目们) for 区名, 条目们 in 分区 if 条目们]
     行们, 格宽px = 选版面(有效)
     fig, gs, ax_页眉, ax_chart = 建分区画布(len(df), len(行们), 主题, 背景路径)

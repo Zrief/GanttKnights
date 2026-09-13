@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from src.获取_prts import 获取公告wikitext
-from src.解析_公告 import 解析分区
+from .获取_prts import 获取公告wikitext
+from .解析_公告 import 解析分区
 
 logger = logging.getLogger("src.解析")
 

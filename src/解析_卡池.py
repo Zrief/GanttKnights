@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 
-from src.获取_prts import PRTS_API, 请求
+from .获取_prts import PRTS_API, 请求
 
 logger = logging.getLogger(__name__)
 

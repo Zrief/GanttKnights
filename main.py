@@ -24,9 +24,6 @@ from src.解析_卡池 import 抓取卡池一览
 
 logger = logging.getLogger("ganttknights")
 
-现在时间 = datetime.now()
-现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
-
 
 def 随机背景() -> str:
     bg列表 = list(Path(settings.bg_dir).glob("*"))
@@ -53,12 +50,16 @@ def _清理图标缓存(缓存目录: Path, 引用名们: set[str]) -> None:
         logger.info("  清理孤儿图标 %d 个", 删了)
 
 
-def _今天写过(路径: Path) -> bool:
-    """文件存在且是今天写的 —— 用于"每天只做一次"的新鲜度检查"""
+def _今天写过(路径: Path, 现在时间: datetime) -> bool:
+    """文件存在且是今天写的 —— 用于"每天只做一次"的新鲜度检查
+
+    现在时间 必须由调用方传入：作为长驻进程（AstrBot 插件）运行时，
+    "今天"要按每次调用的实际时间算，不能是模块导入时刻。
+    """
     return 路径.exists() and datetime.fromtimestamp(路径.stat().st_mtime).date() == 现在时间.date()
 
 
-def 更新增预告() -> dict:
+def 更新增预告(现在时间: datetime, 现在字符串: str) -> dict:
     """抓首页新增时装/模组/凭证，图标缓存到 数据/图片缓存/，写 新增预告.json"""
     首页 = 获取首页()
     if 首页 is None:
@@ -138,7 +139,7 @@ def 读取已解析来源() -> set[str]:
     return 来源
 
 
-def 更新数据(回溯已结束: bool = False) -> None:
+def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> None:
     """第 1 步：爬取 + 解析 + 合并 + 保存活动数据
 
     首页新增预告（凭证/时装/模组）不在活动数据里，由 main 单独按天刷新。
@@ -171,20 +172,25 @@ def 更新数据(回溯已结束: bool = False) -> None:
         logger.warning("未获取到有效活动")
 
 
-def main(force: bool = False, bootstrap: bool = False):
+def main(force: bool = False, bootstrap: bool = False, 现在时间: datetime | None = None):
+    # 时间在每次调用时求值：CLI 下与模块导入时刻等价，
+    # 但在长驻进程（AstrBot 插件）里必须是"本次调用"的时间。
+    现在时间 = 现在时间 or datetime.now()
+    现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
+
     # 第 1 步：获取最新活动数据（每天只爬一次，--force 可强制重新爬取）
-    if not force and _今天写过(Path(settings.all_data_path)):
+    if not force and _今天写过(Path(settings.all_data_path), 现在时间):
         logger.info("今天已爬取过，跳过更新（--force 可强制更新）")
     else:
-        更新数据(回溯已结束=bootstrap)
+        更新数据(现在字符串, 回溯已结束=bootstrap)
 
     # 第 2 步：新增预告（凭证/时装/模组）与活动数据各管各的新鲜度
     # —— 活动数据当天已爬过时，预告仍要确认是今天的，否则底栏会整区缺失
-    if not force and _今天写过(Path(settings.new_items_path)):
+    if not force and _今天写过(Path(settings.new_items_path), 现在时间):
         logger.info("今天已更新过新增预告，跳过")
     else:
         try:
-            更新增预告()
+            更新增预告(现在时间, 现在字符串)
         except Exception:
             logger.exception("新增预告获取失败")
 

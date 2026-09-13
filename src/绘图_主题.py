@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from PIL import Image as PILimage
 
-from src.绘图_颜色 import _oklab_to_srgb, _srgb_to_oklab
+from .绘图_颜色 import _oklab_to_srgb, _srgb_to_oklab
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from src.config import settings
+from .config import settings
 
 logger = logging.getLogger(__name__)
 

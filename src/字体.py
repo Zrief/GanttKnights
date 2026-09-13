@@ -21,9 +21,14 @@ from pathlib import Path
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 
+from .config import settings
+
 logger = logging.getLogger(__name__)
 
-字体目录 = Path(__file__).resolve().parent.parent / "字体"
+# 字体目录取自 settings（默认 ROOT_DIR/字体，可用 GK_FONT_DIR 或构造参数覆盖）。
+# 注意：不能在 import 期把它求值成常量——settings 是可注入的，求值太早就锁死了。
+def 取字体目录() -> Path:
+    return Path(settings.字体目录)
 
 衬线族 = "Noto Serif CJK SC"
 无衬线族 = "Noto Sans CJK SC"
@@ -50,6 +55,7 @@ def 注册字体() -> bool:
     if 已注册:
         return 真粗体可用
 
+    字体目录 = 取字体目录()
     可用文件 = [名 for 名 in 字体表 if (字体目录 / 名).exists()]
     for 名 in 可用文件:
         try:
@@ -73,6 +79,7 @@ def 注册字体() -> bool:
 def 命中检查() -> dict[str, str]:
     """自检：确认各字重真的命中 字体/ 里的文件，而不是系统那支可变字体"""
     注册字体()
+    字体目录 = 取字体目录()
     结果 = {}
     for 名, (族, 字重) in 字体表.items():
         if not (字体目录 / 名).exists():
