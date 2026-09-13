@@ -86,8 +86,9 @@ class GanttKnightsPlugin(Star):
     # ==================== 生命周期 ====================
 
     async def initialize(self) -> None:
-        """只建目录、读一次配置、武装定时任务——爬取与渲染都推迟到真正出图时。"""
+        """只建目录、清一次旧版本残留、读一次配置、武装定时任务——爬取与渲染都推迟到真正出图时。"""
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.渲染.清理旧缓存()      # 阶段四的 渲染缓存/ 已废弃，顺手删掉
         logger.info(
             "罗德岛甘特图已加载：插件目录 %s｜数据目录 %s｜matplotlib 缓存 %s",
             self.plugin_dir, self.data_dir, self.mplconfig_dir,
@@ -189,7 +190,11 @@ class GanttKnightsPlugin(Star):
     # ==================== 状态文本 ====================
 
     def _状态文本(self, event: AstrMessageEvent) -> str:
-        """`/甘特图状态`：数据新鲜度 / 缓存占用 / 推送武装情况 / 本会话标识。"""
+        """`/甘特图状态`：数据新鲜度 / 日差 / 推送武装情况 / 本会话标识。
+
+        刻意不报"缓存条数"之类的东西——渲染不留缓存（§17.4），状态页只回答
+        "数据新不新、今天推送会不会来、上次推得怎么样"。
+        """
         运行配置 = self.运行配置()
         设置 = self.渲染.内核设置(运行配置)
 
@@ -200,7 +205,7 @@ class GanttKnightsPlugin(Star):
             数据行 = f"{时刻:%Y-%m-%d %H:%M}（{新鲜}）"
         else:
             数据行 = "还没有数据（首次出图时抓取）"
-        缓存 = self.渲染.缓存概况()
+        快照日期 = self.渲染.上次快照日期() or "无"
         会话数 = len(self.推送状态.会话们())
         上次 = self.推送状态.上次()
         上次行 = ""
@@ -211,8 +216,7 @@ class GanttKnightsPlugin(Star):
                 上次行 += f"（{上次['说明']}）"
         return (
             f"罗德岛甘特图 v{插件版本}\n"
-            f"数据：{数据行}\n"
-            f"缓存：{缓存['条数']} 张 / {缓存['字节'] / 1024:.0f} KB，最新 {缓存['最新']}\n"
+            f"数据：{数据行}｜最近快照 {快照日期}\n"
             f"{self.推送.一句话(运行配置)}\n"
             f"已记住 {会话数} 个会话（本会话：{event.unified_msg_origin}）"
             f"{上次行}"

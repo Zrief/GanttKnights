@@ -55,12 +55,15 @@ def main(force: bool = False, bootstrap: bool = False, 现在时间: datetime | 
         except Exception:
             logger.exception("新增预告获取失败")
 
-    # 第 3~6 步交给流水线：过滤 → 主题 → 渲染 → 警告
+    # 第 3~6 步交给流水线：过滤 → 主题 → 渲染 → 警告（顺带记录当天数据快照并算日差）
     结果 = render_once(
         现在时间=现在时间,
         强制刷新=False,          # 数据新鲜度已在上两步判定
         控制台打印警告=True,     # CLI 把警告打到 stdout
     )
+    # 日差是这轮改造的核心产出（"今天和昨天比变了什么"），CLI 也顺手打一行
+    if 结果.变化:
+        print("\n" + 结果.变化)
     return 结果
 
 

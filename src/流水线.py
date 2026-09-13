@@ -44,11 +44,16 @@ logger = logging.getLogger("ganttknights")
 
 _DEFAULT_TITLE = "近期活动一览"
 _WARN_SECTIONS = ("凭证兑换", "新增时装", "新增模组")
+无警告文案 = "博士，罗德岛当前所有行动均在正常排期内，无需提醒。"
+"""没有任何需要提醒时的回落文案。
+
+单独拿出来是为了让调用方判得出"这句话有没有信息量"——每日推送只在**真有事**时才附文字
+（`渲染结果.有警告`），否则每天固定发一句废话（docs §17.4）。"""
 
 
 @dataclass(frozen=True)
 class 渲染结果:
-    """render_once() 的产出：产物路径 + 可播报的概要"""
+    """render_once() 的产出：产物路径 + 可播报的概要 + 与上一份快照的日差"""
 
     图片路径: Path
     概况: str
@@ -57,6 +62,11 @@ class 渲染结果:
     条目数: int
     名称数: int
     分区计数: dict[str, int]
+    变化: str = ""
+    """与上一份数据快照的日差（"🆕 新增 X；⏹ 不再列出 Y"）；没有变化/首次记录时为空串。"""
+
+    有警告: bool = False
+    """`警告` 是否言之有物（不是"无需提醒"那句回落）。"""
 
 
 # ============================ 数据获取（入口层按需调用）============================
@@ -284,6 +294,20 @@ def render_once(
         except Exception:
             logger.exception("新增预告获取失败")
 
+    # 数据快照与「和上次比」的日差：每天第一次出图时冻结当天快照（见 src/活动快照.py）。
+    # 放在画图之前：即使这次绘制失败，"今天的数据长什么样"也已经记下来了。
+    变化 = ""
+    try:
+        from .活动快照 import 记录并对比
+
+        日差 = 记录并对比(settings.all_data_path, Path(settings.数据目录) / "历史",
+                          现在时间.date())
+        变化 = 日差.文本()
+        if 变化:
+            logger.info("数据日差 %s", 变化)
+    except Exception:
+        logger.exception("记录/对比数据快照失败（不影响出图）")
+
     # 按时间窗口过滤
     今天 = 现在时间.replace(hour=0, minute=0, second=0, microsecond=0)
     左边界 = 今天 - timedelta(days=settings.left_offset_days)
@@ -324,7 +348,7 @@ def render_once(
     try:
         警告 = 生成警告(记录, 提醒天数=提醒天数, 新增内容=新增内容)
         if not 警告:
-            警告 = "博士，罗德岛当前所有行动均在正常排期内，无需提醒。"
+            警告 = 无警告文案
         if 控制台打印警告:
             print("\n" + "=" * 54)
             print(警告)
@@ -342,4 +366,6 @@ def render_once(
         条目数=len(记录),
         名称数=sum(len(新增内容.get(新增键[k]) or []) for k in _WARN_SECTIONS),
         分区计数={区名: len(条目们) for 区名, 条目们 in 分区},
+        变化=变化,
+        有警告=bool(警告) and 警告 != 无警告文案,
     )
