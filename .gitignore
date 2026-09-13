@@ -20,3 +20,7 @@ tmp
 /.vscode
 /.venv
 .python-version
+
+# AstrBot 运行时数据：若从本仓库目录启动过 AstrBot 或其解释器，会在根目录自举出 data/。
+# 本项目自己的数据在 数据/（上面已逐项排除），这个 data/ 是宿主产生的，不进仓库。
+/data/

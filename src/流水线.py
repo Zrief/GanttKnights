@@ -10,7 +10,18 @@
 
 数据获取（爬取 / 合并 CSV / 新增预告）与"今天是否已爬过"的判断，
 以独立函数形式导出，由 CLI 与插件各自按自己的节奏调用——
-CLI 用 `_今天写过()` 做每日一次的新鲜度检查，插件则可能按缓存签名判断。
+CLI 用 `今天写过()` 做每日一次的新鲜度检查，插件则可能按缓存签名判断。
+
+## 关于重依赖的延迟导入（重要）
+
+本模块**故意不在顶层 import 会拖入 matplotlib 的子模块**（绘图_图表 / 绘图_主题 /
+绘图_排版 / 字体）。原因：同步 `import matplotlib` 实测会让 AstrBot 事件循环
+停顿 0.5s 以上（见 docs/插件化路线.md §5.5），而插件加载期是同步执行的。
+
+顶层只保留"轻"依赖（config / 获取_prts / 汇总_活动 / 解析_* / 生成_警告）；
+matplotlib 相关一律在 `render_once()` 内部按需导入——而 render_once 由入口层放进
+`asyncio.to_thread` 执行，导入开销落在工作线程，不阻塞事件循环。
+代价是首次渲染多花约 1s（一次性），之后走 sys.modules 缓存。
 """
 
 from __future__ import annotations
@@ -27,8 +38,6 @@ from .获取_prts import 下载图片, 获取事件列表, 获取首页
 from .汇总_活动 import 合并保存CSV, 合并商店, 去重排序
 from .解析_API活动 import API转活动列表
 from .生成_警告 import 生成警告
-from .绘图_主题 import 建主题
-from .绘图_排版 import 建分区, 绘制甘特图
 from .筛选_活动 import preprocess_data
 
 logger = logging.getLogger("ganttknights")
@@ -235,6 +244,11 @@ def render_once(
     现在时间 = 现在时间 or datetime.now()
     现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
     输出 = Path(输出路径 or settings.output_path)
+
+    # 重依赖按需导入：matplotlib 只在这里被拖进来，而 render_once 由入口层
+    # 放进 asyncio.to_thread 执行，因此这 1s 左右的导入不会卡住事件循环。
+    from .绘图_排版 import 建分区, 绘制甘特图
+    from .绘图_主题 import 建主题
 
     # 可选的数据刷新（策略由调用方决定，这里只执行）
     if 强制刷新:
