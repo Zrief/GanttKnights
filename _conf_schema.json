@@ -2,7 +2,7 @@
   "render": {
     "description": "出图",
     "type": "object",
-    "hint": "影响画面的参数。数值范围由后端强制夹取；这里的 minimum/maximum 只是文档，表单不读它们。",
+    "hint": "影响画面的参数。数值范围由后端强制夹取；这里的 minimum/maximum 只是文档，表单不读它们。这些值都会进出图缓存的签名：改动任何一项，当天的缓存立即作废并重画。",
     "items": {
       "title": {
         "description": "图片主标题",
@@ -33,25 +33,17 @@
         "maximum": 30,
         "hint": "提醒文案里提前多少天提醒即将结束的活动。"
       },
-      "reuse_seconds": {
-        "description": "出图复用窗口（秒）",
-        "type": "int",
-        "default": 60,
-        "minimum": 0,
-        "maximum": 3600,
-        "hint": "窗口内重复发指令直接复用上一张图，不重新渲染；0 表示每次都重画。"
-      },
       "random_background": {
         "description": "随机背景图",
         "type": "bool",
         "default": true,
-        "hint": "开启：每次随机取一张；关闭且未指定文件：固定用背景图目录里的第一张（出图可复现）。"
+        "hint": "开启：每次在背景图目录里随机取一张；关闭且未指定文件：固定用目录里的第一张（出图可复现）。出图带签名缓存——数据与显示配置都没变、且这张背景图今天已经画过时，会直接复用当天的图而不重画。"
       },
       "background_file": {
         "description": "指定背景图文件",
         "type": "string",
         "default": "",
-        "hint": "背景图目录内的文件名（如 沉沦者.WEBP），也可写绝对路径；填了就忽略上一项。"
+        "hint": "背景图目录内的文件名（如 沉沦者.WEBP），也可写绝对路径；填了就忽略上一项。换了文件（或改了这张图本身）会让当天的缓存作废，下次出图重画。"
       },
       "background_dir": {
         "description": "背景图目录",

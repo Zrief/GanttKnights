@@ -30,6 +30,8 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from PIL import Image as PILimage
@@ -233,7 +235,7 @@ class 主题:
                 f"警告色相{self.警告色相:.0f}°")
 
 
-def 建主题(背景路径: str | None = None) -> 主题:
+def _建主题_计算(背景路径: str | None = None) -> 主题:
     主色相, 副色相, 警告色相, 主L = 取三色(背景路径)
 
     # 分类色弧：主色 → 副色。方向由主副色的实际相对位置决定（取短弧那一侧，不会走反），
@@ -263,3 +265,24 @@ def 建主题(背景路径: str | None = None) -> 主题:
         分隔=_造色(主色相, L_深底 + 0.06, C_背景体系),
         描边=_造色(主色相, L_面板 - 0.10, C_背景体系),
     )
+
+
+@lru_cache(maxsize=4)
+def _建主题缓存(背景路径: str, 指纹: tuple[int, int]) -> 主题:
+    return _建主题_计算(背景路径 or None)
+
+
+def 建主题(背景路径: str | None = None) -> 主题:
+    """背景图 → 整套配色（按"路径 + mtime + 大小"缓存）。
+
+    整套色值完全由这一张图推导（`取候选色` 是纯 Python 的逐像素分桶，实测约 87ms），
+    同一张背景在同一天会被反复用到，所以缓存住；`主题` 是 frozen dataclass，可以安全共享。
+    """
+    if not 背景路径:
+        return _建主题缓存("", (0, 0))
+    try:
+        st = Path(背景路径).stat()
+        指纹 = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        指纹 = (0, 0)
+    return _建主题缓存(str(背景路径), 指纹)

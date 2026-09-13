@@ -15,7 +15,8 @@
 **只暴露"用户真的会调"的东西**（2026-09-14 瘦身）：字体不再进配置——自定义字体走两条既有路径
 （插件目录 `字体/`，或 AstrBot 约定 `data/font.ttf` / `font-bold.ttf` / `font-mono.ttf`），
 见 docs/插件化路线.md §5.4；请求条数与"进行中"宽限小时数也退到内核默认值（GK_* 可覆盖），
-它们只会让用户把图配错。
+它们只会让用户把图配错。阶段四又拿掉了 `render.reuse_seconds`：签名缓存能自己判断
+"什么都没变"，不需要用户填窗口秒数；要强行重画走 `/甘特图刷新`（阶段五）。
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ from typing import Any
     "left_offset_days": (0, 30),
     "right_offset_days": (7, 30),   # 上限 30：再长时色条被压窄，名字/刻度判定开始贴边（实测见文档）
     "remind_days": (1, 30),
-    "reuse_seconds": (0, 3600),
 }
 
 真值串 = {"1", "true", "yes", "on", "是", "真", "开"}
@@ -47,7 +47,6 @@ class 运行配置:
     左边界天数: int = 3
     右边界天数: int = 22
     提醒天数: int = 3
-    复用窗口秒: int = 60
     随机背景: bool = True
     指定背景: str = ""
     背景目录: str = ""
@@ -123,7 +122,6 @@ def 读取配置(config: Any) -> 运行配置:
         左边界天数=整数(render, "left_offset_days", 默认.左边界天数),
         右边界天数=整数(render, "right_offset_days", 默认.右边界天数),
         提醒天数=整数(render, "remind_days", 默认.提醒天数),
-        复用窗口秒=整数(render, "reuse_seconds", 默认.复用窗口秒),
         随机背景=读取开关(render.get("random_background"), 默认.随机背景),
         指定背景=读取文本(render.get("background_file"), 默认.指定背景),
         背景目录=读取文本(render.get("background_dir"), 默认.背景目录),
