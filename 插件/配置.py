@@ -21,7 +21,7 @@ from typing import Any
 # 数值字段的夹取范围：(最小, 最大)。**与 _conf_schema.json 的 minimum/maximum 必须一致**。
 范围: dict[str, tuple[int, int]] = {
     "left_offset_days": (0, 30),
-    "right_offset_days": (7, 60),
+    "right_offset_days": (7, 30),   # 上限 30：再长时色条被压窄，名字/刻度判定开始贴边（实测见文档）
     "remind_days": (1, 30),
     "reuse_seconds": (0, 3600),
     "api_limit": (10, 200),

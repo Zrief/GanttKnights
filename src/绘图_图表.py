@@ -18,6 +18,11 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+# 字体只需注册一次：`fm.fontManager.addfont()` 在 matplotlib 3.11 **不按路径去重**，
+# 每调一次就往 ttflist 里加一条并清掉 findfont 缓存——实测每次渲染白花 ~96ms，
+# 而且长驻进程里字体会一路涨（每次 +1 条）。所以这里自己守住"一次"。
+_字体已设置 = False
+
 
 def 缩放图片(路径: str | Path, 目标宽: int, 目标高: int) -> np.ndarray:
     """读取图片 → cover 缩放 → 居中裁剪 → 返回 float RGB (0~1)"""
@@ -35,11 +40,15 @@ def 缩放图片(路径: str | Path, 目标宽: int, 目标高: int) -> np.ndarr
 
 
 def 设置字体() -> None:
-    """注册 settings.font_path 指向的字体；缺失时回退到系统中文字体"""
+    """注册 settings.font_path 指向的字体；缺失时回退到系统中文字体（每个进程只做一次）"""
+    global _字体已设置
+    if _字体已设置:
+        return
     font_path = Path(settings.font_path)
     if font_path.exists():
         fm.fontManager.addfont(str(font_path))
         plt.rcParams["font.sans-serif"] = [settings.font_family]
+        _字体已设置 = True
         return
     # fallback: try system CJK fonts
     for candidate in ("Noto Sans CJK SC", "Noto Sans CJK JP", "Droid Sans Fallback", "AR PL UMing CN"):
@@ -47,6 +56,7 @@ def 设置字体() -> None:
             plt.rcParams["font.sans-serif"] = [candidate]
             fm.findfont(candidate, fallback_to_default=False)
             logger.warning("字体 %s 不存在，回退到 %s", settings.font_path, candidate)
+            _字体已设置 = True
             return
         except Exception:
             continue
