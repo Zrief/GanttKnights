@@ -59,6 +59,7 @@ def 获取事件列表(limit: int = 50) -> list[dict]:
         "|?活动结束时间"
         "|?活动开始时间cn"
         "|?活动类型"
+        "|?官网链接"
         "|sort=活动开始时间"
         "|order=desc"
         f"|limit={limit}"

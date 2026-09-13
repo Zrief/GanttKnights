@@ -55,11 +55,21 @@ def _提取干员(名称: str) -> str:
 def 去重排序(活动列表: list[dict]) -> list[dict]:
     """按干员名+时间去重（卡池），按开始时间排序"""
     seen = set()
+    seen登录窗口 = set()
     去重后 = []
     for a in 活动列表:
         if a["类型"] == 0:
             干员 = _提取干员(a["名称"])
             key = (干员, a["开始时间"], a["结束时间"], a["类型"]) if 干员 else (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
+        elif a["类型"] == 2:
+            # 登录/签到活动：公告里的签到板块常不带本名（如月行水上的
+            # 签到其实就是此夜同行），按时间窗去重，保留先出现的 ask 官方名
+            key = ("登录", a["开始时间"], a["结束时间"])
+            if key in seen登录窗口:
+                continue
+            seen登录窗口.add(key)
+            去重后.append(a)
+            continue
         else:
             key = (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
         if key not in seen:

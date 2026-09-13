@@ -19,33 +19,32 @@ logger = logging.getLogger("prts_scraper")
 现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def 爬取(限制: int = 10) -> list[dict]:
+def 爬取(限制: int = 10, 回溯已结束: bool = False) -> list[dict]:
     """串联 获取→解析→合并→排序 的完整流程"""
     api原始 = 获取事件列表(限制)
     if not api原始:
         logger.warning("API 未返回数据")
         return []
 
-    活动列表 = API转活动列表(api原始, 现在字符串)
+    活动列表 = API转活动列表(api原始, 现在字符串, 回溯已结束=回溯已结束)
     活动列表 = 合并商店(活动列表)
     活动列表 = 去重排序(活动列表)
     return 活动列表
 
 
 def main():
+    回溯已结束 = "--bootstrap" in sys.argv
     限制 = 10
-    if len(sys.argv) > 1:
-        try:
-            限制 = max(1, int(sys.argv[1]))
-        except ValueError:
-            pass
+    for arg in sys.argv[1:]:
+        if arg.isdigit():
+            限制 = max(1, int(arg))
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S",
     )
     logger.info("正在获取活动数据 (limit=%d)...", 限制)
 
-    activities = 爬取(限制)
+    activities = 爬取(限制, 回溯已结束=回溯已结束)
     if not activities:
         logger.warning("未获取到活动数据")
         sys.exit(1)

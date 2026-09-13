@@ -8,20 +8,18 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from random import choice
 
-import matplotlib.pyplot as plt
-
 from src.config import settings, setup_logging
 from src.获取_prts import 获取事件列表, 获取首页, 下载图片
 from src.解析_API活动 import API转活动列表
-from src.解析_首页 import 解析新增内容
+from src.解析_首页 import 解析新增内容, 预告键
 from src.汇总_活动 import (
     合并商店,
     去重排序,
     合并保存CSV,
 )
 from src.筛选_活动 import preprocess_data
-from src.绘图_图表 import plot_events, set_x_ticks, 创建画布
-from src.绘图_颜色 import extract_main_colors
+from src.绘图_排版 import 建分区, 绘制甘特图
+from src.绘图_主题 import 建主题
 from src.解析_卡池 import 抓取卡池一览
 
 logger = logging.getLogger("ganttknights")
@@ -30,27 +28,49 @@ logger = logging.getLogger("ganttknights")
 现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def 随机路径() -> tuple[str, str]:
+def 随机背景() -> str:
     bg列表 = list(Path(settings.bg_dir).glob("*"))
-    tx列表 = list(Path(settings.texture_dir).glob("*"))
     if not bg列表:
         logger.error("背景图目录为空: %s", settings.bg_dir)
         raise SystemExit(1)
-    if not tx列表:
-        logger.error("纹理目录为空: %s", settings.texture_dir)
-        raise SystemExit(1)
-    return str(choice(bg列表)), str(choice(tx列表))
+    return str(choice(bg列表))
+
+
+def _写新增预告(新增: dict) -> None:
+    Path(settings.new_items_path).write_text(
+        json.dumps(新增, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _清理图标缓存(缓存目录: Path, 引用名们: set[str]) -> None:
+    """删除不再被当前预告引用的孤儿图标"""
+    删了 = 0
+    for f in 缓存目录.iterdir():
+        if f.is_file() and f.name not in 引用名们:
+            f.unlink()
+            删了 += 1
+    if 删了:
+        logger.info("  清理孤儿图标 %d 个", 删了)
+
+
+def _今天写过(路径: Path) -> bool:
+    """文件存在且是今天写的 —— 用于"每天只做一次"的新鲜度检查"""
+    return 路径.exists() and datetime.fromtimestamp(路径.stat().st_mtime).date() == 现在时间.date()
 
 
 def 更新增预告() -> dict:
-    """抓首页新增时装/模组，图标缓存到 数据/图片缓存/，写 新增预告.json"""
+    """抓首页新增时装/模组/凭证，图标缓存到 数据/图片缓存/，写 新增预告.json"""
     首页 = 获取首页()
     if 首页 is None:
-        logger.warning("首页获取失败，跳过新增预告")
+        logger.warning("首页获取失败，沿用上次预告数据")
         return {}
     新增 = 解析新增内容(首页)
     if not any(新增.values()):
-        logger.warning("首页未解析到新增时装/模组")
+        # 覆盖为带时间戳的空预告，避免警告里长期播报早已结束的上新
+        logger.warning("首页未解析到新增内容，预告清空")
+        新增 = {键: [] for 键 in 预告键}
+        新增["更新时间"] = 现在字符串
+        _写新增预告(新增)
         return 新增
 
     缓存目录 = Path(settings.icon_cache_dir)
@@ -59,16 +79,46 @@ def 更新增预告() -> dict:
         for 条目 in 条目们:
             目标 = 缓存目录 / 条目["图标文件名"]
             if 下载图片(条目["图标"], 目标):
-                条目["图标文件"] = str(目标)
+                条目["图标文件"] = 条目["图标文件名"]
 
-    Path(settings.new_items_path).write_text(
-        json.dumps(新增, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    新增["更新时间"] = 现在字符串
+    _写新增预告(新增)
+    引用名们 = {t["图标文件名"] for ts in 新增.values() if isinstance(ts, list) for t in ts}
+    _清理图标缓存(缓存目录, 引用名们)
     logger.info(
-        "新增预告: 时装 %d / 模组 %d，图标缓存于 %s",
-        len(新增["时装"]), len(新增["模组"]), 缓存目录,
+        "新增预告: " + " / ".join(f"{键} {len(新增[键])}" for 键 in 预告键) + "，图标缓存于 %s",
+        缓存目录,
     )
     return 新增
+
+
+def 读新增预告() -> dict:
+    """读 数据/新增预告.json；缺失或损坏时按空预告处理（底栏上新区留空）"""
+    路径 = Path(settings.new_items_path)
+    if not 路径.exists():
+        logger.warning("新增预告不存在，底栏上新区留空: %s", 路径)
+        return {}
+    try:
+        return json.loads(路径.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("新增预告解析失败，底栏上新区留空")
+        return {}
+
+
+def 补下载图标(分区: list[tuple[str, list[dict]]]) -> None:
+    """底栏条目的头像补齐到 数据/图片缓存/（已存在的跳过），失败只记数不中断"""
+    缓存目录 = Path(settings.icon_cache_dir)
+    缓存目录.mkdir(parents=True, exist_ok=True)
+    失败 = 0
+    for _, 条目们 in 分区:
+        for 条目 in 条目们:
+            url, 文件名 = 条目.get("图标"), 条目.get("图标文件名")
+            if not url or not 文件名:
+                continue
+            if not 下载图片(url, 缓存目录 / 文件名):
+                失败 += 1
+    if 失败:
+        logger.warning("%d 个头像下载失败，渲染时会跳过", 失败)
 
 
 def 读取已解析来源() -> set[str]:
@@ -88,8 +138,11 @@ def 读取已解析来源() -> set[str]:
     return 来源
 
 
-def 更新数据() -> None:
-    """第 1 步：爬取 + 解析 + 合并 + 保存"""
+def 更新数据(回溯已结束: bool = False) -> None:
+    """第 1 步：爬取 + 解析 + 合并 + 保存活动数据
+
+    首页新增预告（凭证/时装/模组）不在活动数据里，由 main 单独按天刷新。
+    """
     try:
         api原始 = 获取事件列表(settings.api_limit)
     except Exception:
@@ -99,7 +152,7 @@ def 更新数据() -> None:
         logger.warning("API 未返回数据")
         return
 
-    活动列表 = API转活动列表(api原始, 现在字符串, 读取已解析来源())
+    活动列表 = API转活动列表(api原始, 现在字符串, 读取已解析来源(), 回溯已结束=回溯已结束)
 
     活动列表 = 合并商店(活动列表)
 
@@ -108,12 +161,6 @@ def 更新数据() -> None:
         活动列表.extend(抓取卡池一览())
     except Exception:
         logger.exception("获取卡池数据失败")
-
-    # 首页新增时装/模组（图标缓存到本地）
-    try:
-        更新增预告()
-    except Exception:
-        logger.exception("新增预告获取失败")
 
     活动列表 = 去重排序(活动列表)
 
@@ -124,19 +171,24 @@ def 更新数据() -> None:
         logger.warning("未获取到有效活动")
 
 
-def main(force: bool = False):
+def main(force: bool = False, bootstrap: bool = False):
     # 第 1 步：获取最新活动数据（每天只爬一次，--force 可强制重新爬取）
-    数据路径 = Path(settings.all_data_path)
-    if (
-        not force
-        and 数据路径.exists()
-        and datetime.fromtimestamp(数据路径.stat().st_mtime).date() == 现在时间.date()
-    ):
+    if not force and _今天写过(Path(settings.all_data_path)):
         logger.info("今天已爬取过，跳过更新（--force 可强制更新）")
     else:
-        更新数据()
+        更新数据(回溯已结束=bootstrap)
 
-    # 第 2 步：按时间窗口过滤
+    # 第 2 步：新增预告（凭证/时装/模组）与活动数据各管各的新鲜度
+    # —— 活动数据当天已爬过时，预告仍要确认是今天的，否则底栏会整区缺失
+    if not force and _今天写过(Path(settings.new_items_path)):
+        logger.info("今天已更新过新增预告，跳过")
+    else:
+        try:
+            更新增预告()
+        except Exception:
+            logger.exception("新增预告获取失败")
+
+    # 第 3 步：按时间窗口过滤
     今天 = 现在时间.replace(hour=0, minute=0, second=0, microsecond=0)
     左边界 = 今天 - timedelta(days=settings.left_offset_days)
     右边界 = 今天 + timedelta(days=settings.right_offset_days - 今天.weekday())
@@ -150,36 +202,29 @@ def main(force: bool = False):
     if df.empty:
         logger.warning("没有即将开始或进行中的活动，请更新数据源。")
 
-    # 第 3 步：选择背景图片 + 提取颜色
-    背景路径, 纹理路径 = 随机路径()
-    颜色 = extract_main_colors(背景路径, settings.num_colors)
+    # 第 4 步：随机背景图 → 整套配色由这一张图推导
+    背景路径 = 随机背景()
+    主题 = 建主题(背景路径)
 
-    # 第 4 步：绘图 + 保存
-    总小时 = (右边界 - 左边界).total_seconds() / 3600
-    fig, ax = 创建画布(背景路径, 纹理路径, len(df))
-    plot_events(df, 左边界, 右边界, 颜色, ax=ax)
-    ax.set_title("近期活动一览", color="white")
-    set_x_ticks(ax, 左边界, 右边界)
-    ax.set_yticks([])
-    ax.set_xlim(0, 总小时)
-    ax.set_ylim(-0.5, max(len(df) - 0.5, 0))
-    ax.spines[["right", "left"]].set_visible(False)
-    fig.tight_layout(pad=0.5)
+    # 第 5 步：底栏上新区（凭证/时装/模组）+ 排版绘图
+    新增内容 = 读新增预告()
+    分区 = 建分区(新增内容)
+    try:
+        补下载图标(分区)
+    except Exception:
+        logger.exception("头像补下载失败，缺图标的条目按无图渲染")
 
     try:
-        fig.savefig(settings.output_path)
-        logger.info("图表已保存至 %s", settings.output_path)
+        概况 = 绘制甘特图(
+            settings.output_path, 分区, df, 主题, 左边界, 右边界, 背景路径, 现在时间,
+        )
+        logger.info("图表已保存至 %s（%s）", settings.output_path, 概况)
     except Exception:
-        logger.exception("保存图表失败")
-    finally:
-        plt.close(fig)
+        logger.exception("绘制图表失败")
 
-    # 第 5 步：生成过期警告输出
+    # 第 6 步：生成过期警告输出
     from src.生成_警告 import 生成警告
     try:
-        新增内容 = {}
-        if Path(settings.new_items_path).exists():
-            新增内容 = json.loads(Path(settings.new_items_path).read_text(encoding="utf-8"))
         警告 = 生成警告(df, 提醒天数=3, 新增内容=新增内容)
         if 警告:
             print("\n" + "=" * 54)
@@ -200,6 +245,11 @@ if __name__ == "__main__":
         action="store_true",
         help="强制重新爬取数据（忽略'今天已爬取过'检查）",
     )
+    parser.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="回溯已结束活动的公告，补录剿灭/保全等长期任务（数据初次建立时跑一次即可，需配合 --force）",
+    )
     args = parser.parse_args()
     setup_logging()
-    main(force=args.force)
+    main(force=args.force, bootstrap=args.bootstrap)

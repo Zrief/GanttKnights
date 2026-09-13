@@ -1,12 +1,12 @@
+"""颜色工具 — Oklab ⇄ sRGB 转换与 alpha 通道处理
+
+只放底层数学与图像工具；配色（主色 / 副色 / 警告色的推导）在 src/绘图_主题.py，
+排版层用 set_alpha_channel 给背景图叠透明度。
+"""
+
 from __future__ import annotations
 
-import logging
-from typing import Any
-
 import numpy as np
-from PIL import Image as PILimage
-
-logger = logging.getLogger(__name__)
 
 # ---- Oklab 转换矩阵 ----
 
@@ -35,7 +35,8 @@ def _srgb_to_linear(c: np.ndarray) -> np.ndarray:
 
 
 def _linear_to_srgb(c: np.ndarray) -> np.ndarray:
-    """Linear RGB → sRGB(0~1)"""
+    """Linear RGB → sRGB(0~1)：Oklab 反算可能得到轻微出界的负值，先夹到 0 再开幂"""
+    c = np.clip(c, 0.0, None)
     mask = c <= 0.0031308
     out = np.where(mask, c * 12.92, 1.055 * (c ** (1 / 2.4)) - 0.055)
     return np.clip(out, 0.0, 1.0)
@@ -56,59 +57,6 @@ def _oklab_to_srgb(lab: np.ndarray) -> np.ndarray:
     lms = lms_cbrt ** 3
     lin = lms @ _LMS到线性.T
     return _linear_to_srgb(lin)
-
-
-# ---- 颜色提取 ----
-
-def extract_main_colors(background_path: str, num_colors: int = 10) -> list[str]:
-    try:
-        pilimg = PILimage.open(background_path)
-    except Exception:
-        logger.exception("无法打开背景图片: %s", background_path)
-        return _fallback_colors(num_colors)
-
-    small = pilimg.resize((80, 80))
-    result = small.convert("P", palette=PILimage.ADAPTIVE, colors=num_colors)
-    result = result.convert("RGB")
-    main_colors = result.getcolors()
-    if not main_colors:
-        logger.warning("未能从图片中提取颜色: %s", background_path)
-        return _fallback_colors(num_colors)
-
-    # 取前 num_colors 种颜色，数量从多到少
-    raw = [col for _, col in main_colors[:num_colors]]
-    if not raw:
-        return _fallback_colors(num_colors)
-
-    # 转 Oklab
-    rgb = np.array(raw, dtype=np.float64) / 255.0
-    lab = _srgb_to_oklab(rgb)
-
-    # 调亮度：将 L 范围线性拉伸到 [0.6, 1.0]，保留相对差异
-    L = lab[:, 0]
-    L_min, L_max = L.min(), L.max()
-    L_range = max(L_max - L_min, 0.01)
-    lab[:, 0] = 0.6 + (L - L_min) / L_range * 0.4
-
-    # 转回 sRGB
-    rgb_out = _oklab_to_srgb(lab)
-
-    # 转 hex
-    colors = []
-    for r, g, b in rgb_out:
-        ri = round(r * 255)
-        gi = round(g * 255)
-        bi = round(b * 255)
-        colors.append(f"#{ri:02x}{gi:02x}{bi:02x}")
-
-    if not colors:
-        return _fallback_colors(num_colors)
-    return colors
-
-
-def _fallback_colors(n: int) -> list[str]:
-    palette = ["#4C72B0", "#55A868", "#C44E52", "#8172B2", "#CCB974", "#64B5CD"]
-    return (palette * (n // len(palette) + 1))[:n]
 
 
 def set_alpha_channel(image_data: np.ndarray, alpha_value: float) -> np.ndarray:
