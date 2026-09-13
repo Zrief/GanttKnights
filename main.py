@@ -14,9 +14,10 @@
 * **一切阻塞都在 `asyncio.to_thread` 里**：渲染是秒级 CPU 占用，取数是同步 httpx（§5.6）；
 * **数据与代码分家**：数据写 `data/plugin_data/<插件名>/`（官方 storage 写法），
   字体/背景图留在插件目录里只读（§5.3）；
-* **出图走签名缓存**：数据内容、显示配置、背景图、字体都没变时直接发缓存图，
-  不重画（`插件/缓存.py`，§7）；
-* 指令元数据只有一份：`插件/指令.py` 的 `CommandSpec`（§6.3）。
+* **出图走签名缓存**：数据内容、显示配置、背景图、字体都没变时直接发缓存图，不重画（§7）；
+* **入口层只做四件事**：读配置、说一句进度、出图、发图。判断（数据要不要刷、缓存有没有命中、
+  背景选哪张）全在 `渲染服务` 里——入口层多做一份"预判"只会多一条会分叉的路径；
+* 指令与回调的元数据只有一份：`插件/指令.py` 的 `CommandSpec`（§6.3）。
 """
 
 from __future__ import annotations
@@ -24,20 +25,22 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import astrbot.api.message_components as 组件
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .插件 import 文案
 from .插件.配置 import 读取配置
-from .插件.指令 import 帮助命令, 甘特图命令, 生成帮助文本
-from .插件.渲染 import 渲染服务
+from .插件.指令 import 刷新命令, 帮助命令, 甘特图命令, 状态命令, 生成帮助文本
+from .插件.渲染 import 素材缺失, 渲染服务
+from .插件.推送 import 推送状态, 推送服务
 
 PLUGIN_NAME = "astrbot_plugin_ganttknights"
 
 插件版本 = "0.1.0"
-"""与 metadata.yaml 的 version 一致（帮助页会显示它）。"""
+"""与 metadata.yaml 的 version 一致（帮助页会显示）。"""
 
 
 def _额外字体(数据根: Path | None = None) -> dict[str, str]:
@@ -53,7 +56,7 @@ def _额外字体(数据根: Path | None = None) -> dict[str, str]:
 
 
 class GanttKnightsPlugin(Star):
-    """指令 + 生命周期；渲染细节全部委托给 `渲染服务`。"""
+    """指令 + 生命周期；渲染细节全部委托给 `渲染服务`，推送委托给 `推送服务`。"""
 
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)  # 注意：config 不走 super()，自己存
@@ -72,61 +75,145 @@ class GanttKnightsPlugin(Star):
         # 构造期只准备缓存目录与环境变量，不 import matplotlib（那会阻塞加载 1s 以上）
         self.mplconfig_dir = self.渲染.准备matplotlib环境()
 
+        self.推送状态 = 推送状态(self.data_dir / "推送状态.json")
+        self.推送 = 推送服务(
+            渲染=self.渲染,
+            状态=self.推送状态,
+            发送=self._发送,
+            配置读取=self.运行配置,
+        )
+
+    # ==================== 生命周期 ====================
+
     async def initialize(self) -> None:
-        """插件激活：只建目录、记日志——爬取与渲染都推迟到指令触发时。"""
+        """只建目录、读一次配置、武装定时任务——爬取与渲染都推迟到真正出图时。"""
         self.data_dir.mkdir(parents=True, exist_ok=True)
         logger.info(
             "罗德岛甘特图已加载：插件目录 %s｜数据目录 %s｜matplotlib 缓存 %s",
-            self.plugin_dir,
-            self.data_dir,
-            self.mplconfig_dir,
+            self.plugin_dir, self.data_dir, self.mplconfig_dir,
         )
+        logger.info("每日推送：%s", self.推送.确保任务(self.运行配置()))
 
     async def terminate(self) -> None:
-        """插件禁用/重载：阶段三/四没有后台任务与调度器（阶段五才加）。
+        """插件禁用/重载：关停调度器（渲染缓存**故意不清**——它的意义就是跨重启复用）。
 
-        渲染缓存**故意不清**：它落在 `data/plugin_data/<插件名>/渲染缓存/` 下，
-        存在的意义就是跨重启复用（重新加载插件不该让当天的图重画一遍）。
+        ⚠️ 不要给这个类加 `__del__`：`star_manager.py` 是 `if __del__ … elif terminate`，
+        加了之后 `terminate()` 永远不会执行（§16）。
         """
+        await self.推送.停()
         logger.info("罗德岛甘特图已卸载。")
+
+    # ==================== 内部工具 ====================
+
+    def 运行配置(self):
+        """现读配置（WebUI 改完无需重载插件；定时任务也走这里）"""
+        return 读取配置(self.config)
+
+    async def _发送(self, unified_msg_origin: str, 文本: str, 图片路径: str) -> bool:
+        """把一条消息投递到指定会话。
+
+        - 只用 `unified_msg_origin`（裸 session_id 会在宿主的 `split(":", 2)` 处炸，§16）；
+        - `send_message()` 返回 `False` 只表示"没找到匹配的平台实例"，非法 umo 直接抛
+          `ValueError` → 这里两者都当失败，异常向上抛给推送服务记进状态；
+        - 不预检平台能力：`support_proactive_message` 是 4.28 新增且默认 True（信不过），
+          发一次并把结果记下来比读字段可靠（§16）。
+        """
+        链 = [组件.Plain(text=文本)] if 文本 else []
+        链.append(组件.Image.fromFileSystem(图片路径))
+        结果 = await self.context.send_message(unified_msg_origin, MessageChain(链))
+        if 结果 is False:
+            logger.warning("投递未找到平台实例：%s", unified_msg_origin)
+            return False
+        return True
 
     # ==================== 指令 ====================
 
     @filter.command(甘特图命令.name, alias=甘特图命令.alias_set)
     async def 出图(self, event: AstrMessageEvent):
         """生成明日方舟近期活动甘特图长图。"""
-        现在时间 = datetime.now()
-        运行配置 = 读取配置(self.config)
+        # 谁用过指令就记住谁：每日推送的目标由此自动得到，不需要用户填会话 ID（§16）。
+        # 顺手重新武装一次定时任务（配置在 WebUI 里改过时不必重启插件）。
+        self.推送状态.记住会话(event.unified_msg_origin)
+        运行配置 = self.运行配置()
+        self.推送.确保任务(运行配置)
+        yield event.plain_result(文案.准备中)
         try:
-            素材缺失 = self.渲染.素材问题(运行配置)
-            if 素材缺失 is not None:
-                yield event.plain_result(文案.缺背景图.format(目录=素材缺失))
-                return
-
-            # 命中签名缓存时几乎是瞬时的，就别再发一句"请稍候"打扰用户
-            # （这一步只是预判，真正的判定在 出图() 的锁内重做）
-            if not self.渲染.查现成图(现在时间, 运行配置):
-                需数据, 需预告 = self.渲染.更新计划(现在时间, 运行配置)
-                yield event.plain_result(文案.更新数据中 if (需数据 or 需预告) else 文案.渲染中)
-
             结果 = await self.渲染.出图(
-                现在时间=现在时间,
-                运行配置=运行配置,
-                自动更新=运行配置.每日自动更新,
+                现在时间=datetime.now(), 运行配置=运行配置, 自动更新=运行配置.每日自动更新
             )
-
             图片 = Path(结果.图片路径)
             if not self.渲染.产物可用(图片):
-                # render_once() 内部会吞掉绘制异常（只记日志）；这里按"文件头魔数完整"
-                # 再判一次，截断/空文件都不会当成品发出去
+                # render_once() 内部会吞掉绘制异常（只记日志）；这里按"文件头魔数完整"再判一次
                 yield event.plain_result(文案.渲染失败)
                 return
             yield event.image_result(str(图片))
+        except 素材缺失 as exc:
+            yield event.plain_result(文案.说明素材缺失(exc))
         except Exception:
             logger.exception("生成甘特图失败")
+            yield event.plain_result(文案.渲染失败)
+
+    @filter.command(状态命令.name, alias=状态命令.alias_set)
+    async def 状态(self, event: AstrMessageEvent):
+        """查看数据/缓存/每日推送的现状。"""
+        # 顺手重新武装：状态页里报的"下次推送"必须与实际生效的一致
+        self.推送.确保任务(self.运行配置())
+        yield event.plain_result(self._状态文本(event))
+
+    @filter.command(刷新命令.name, alias=刷新命令.alias_set)
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def 刷新(self, event: AstrMessageEvent):
+        """强制重新抓数据并重画（管理员）。"""
+        yield event.plain_result(文案.强制刷新中)
+        try:
+            结果 = await self.渲染.出图(
+                现在时间=datetime.now(), 运行配置=self.运行配置(),
+                自动更新=True, 强制刷新=True,
+            )
+            图片 = Path(结果.图片路径)
+            if not self.渲染.产物可用(图片):
+                yield event.plain_result(文案.渲染失败)
+                return
+            yield event.image_result(str(图片))
+        except 素材缺失 as exc:
+            yield event.plain_result(文案.说明素材缺失(exc))
+        except Exception:
+            logger.exception("强制刷新失败")
             yield event.plain_result(文案.渲染失败)
 
     @filter.command(帮助命令.name, alias=帮助命令.alias_set)
     async def 帮助(self, event: AstrMessageEvent):
         """查看本插件全部指令。"""
         yield event.plain_result(生成帮助文本(插件版本))
+
+    # ==================== 状态文本 ====================
+
+    def _状态文本(self, event: AstrMessageEvent) -> str:
+        """`/甘特图状态`：数据新鲜度 / 缓存占用 / 推送武装情况 / 本会话标识。"""
+        运行配置 = self.运行配置()
+        设置 = self.渲染.内核设置(运行配置)
+
+        数据 = Path(设置.all_data_path)
+        if 数据.exists():
+            时刻 = datetime.fromtimestamp(数据.stat().st_mtime)
+            新鲜 = "今天已更新" if 时刻.date() == datetime.now().date() else "不是今天的"
+            数据行 = f"{时刻:%Y-%m-%d %H:%M}（{新鲜}）"
+        else:
+            数据行 = "还没有数据（首次出图时抓取）"
+        缓存 = self.渲染.缓存概况()
+        会话数 = len(self.推送状态.会话们())
+        上次 = self.推送状态.上次()
+        上次行 = ""
+        if 上次:
+            上次行 = (f"\n上次推送：{上次.get('时刻', '?')} 成功 {上次.get('成功', 0)}"
+                      f" / 失败 {上次.get('失败', 0)}")
+            if 上次.get("说明"):
+                上次行 += f"（{上次['说明']}）"
+        return (
+            f"罗德岛甘特图 v{插件版本}\n"
+            f"数据：{数据行}\n"
+            f"缓存：{缓存['条数']} 张 / {缓存['字节'] / 1024:.0f} KB，最新 {缓存['最新']}\n"
+            f"{self.推送.一句话(运行配置)}\n"
+            f"已记住 {会话数} 个会话（本会话：{event.unified_msg_origin}）"
+            f"{上次行}"
+        )

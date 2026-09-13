@@ -49,6 +49,20 @@ class CommandSpec:
     example="/甘特图",
 )
 
+状态命令 = CommandSpec(
+    name="甘特图状态",
+    aliases=(),
+    summary="查看数据更新时间、出图缓存占用、每日推送状态与当前会话标识。",
+    example="/甘特图状态",
+)
+
+刷新命令 = CommandSpec(
+    name="甘特图刷新",
+    aliases=("甘特图更新",),
+    summary="强制重新抓取数据并重画（管理员）；平时不需要，数据看着不对时用。",
+    example="/甘特图刷新",
+)
+
 帮助命令 = CommandSpec(
     name="甘特图帮助",
     aliases=(),
@@ -56,7 +70,7 @@ class CommandSpec:
     example="/甘特图帮助",
 )
 
-命令表: tuple[CommandSpec, ...] = (甘特图命令, 帮助命令)
+命令表: tuple[CommandSpec, ...] = (甘特图命令, 状态命令, 刷新命令, 帮助命令)
 
 
 def 生成帮助文本(版本: str) -> str:
@@ -68,6 +82,7 @@ def 生成帮助文本(版本: str) -> str:
         "",
         "说明",
         "· 数据来自 PRTS Wiki；每天第一次出图时会自动更新数据，之后直接出图。",
-        "· 图上时间窗、每日自动更新、背景图等可在 AstrBot 插件配置里调整。",
+        "· 图上时间窗、底栏面板、背景图、每日推送等可在 AstrBot 插件配置里调整。",
+        "· 每日推送会发到「用过 /甘特图 的会话」：先在目标群里发一次指令，再去配置里打开推送。",
     ]
     return "\n".join(行们)

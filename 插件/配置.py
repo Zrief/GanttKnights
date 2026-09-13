@@ -47,7 +47,6 @@ class 运行配置:
     左边界天数: int = 3
     右边界天数: int = 22
     提醒天数: int = 3
-    随机背景: bool = True
     指定背景: str = ""
     背景目录: str = ""
     # panels
@@ -56,12 +55,45 @@ class 运行配置:
     模组面板: bool = True
     # data
     每日自动更新: bool = True
+    # push
+    推送开关: bool = False
+    推送时刻: str = "08:00"
 
     def 底栏分区(self) -> tuple[str, ...] | None:
         """要展示的底栏分区；三个都开时返回 None（走内核默认路径，行为与改造前一致）。"""
         开着 = tuple(名 for 名, 显示 in zip(底栏区名, (self.凭证面板, self.时装面板, self.模组面板),
                                             strict=True) if 显示)
         return None if len(开着) == len(底栏区名) else 开着
+
+    def 推送时点(self) -> tuple[int, int]:
+        """推送时刻 → (时, 分)；初始化时已被 `规范化时刻()` 归一，这里不会失败。"""
+        时, 分 = self.推送时刻.split(":")
+        return int(时), int(分)
+
+
+推送时刻默认 = "08:00"
+"""默认推送时刻。
+
+> 为什么是 08:00 而不是 00:0x：明日方舟在北京时间 **04:00** 日切，`今天写过()` 也按自然日判断，
+> 00:00–04:00 之间出图会拿到"还没换日"的数据。提示文案里要写清这一条（§16）。
+"""
+
+
+def 规范化时刻(值: Any) -> str:
+    """读 `HH:MM` 形式的配置项，归一成零填充的字符串；坏值一律退回默认。
+
+    `"8:5"` / `" 08:05 "` / `"08:05"` 都得到 `"08:05"`——展示与比较都需要单一形态。
+    越界（`"25:00"`）、格式不对、非字符串都退回默认值，绝不让一个坏字符串把调度器搞崩。
+    """
+    if isinstance(值, str):
+        try:
+            时文本, 分文本 = 值.strip().split(":", 1)
+            时, 分 = int(时文本), int(分文本)
+        except (ValueError, TypeError):
+            return 推送时刻默认
+        if 0 <= 时 <= 23 and 0 <= 分 <= 59:
+            return f"{时:02d}:{分:02d}"
+    return 推送时刻默认
 
 
 def 读取节(config: Any, 节名: str) -> dict[str, Any]:
@@ -112,6 +144,7 @@ def 读取配置(config: Any) -> 运行配置:
     render = 读取节(config, "render")
     panels = 读取节(config, "panels")
     data = 读取节(config, "data")
+    push = 读取节(config, "push")
 
     def 整数(节: dict[str, Any], 键: str, 默认值: int) -> int:
         最小, 最大 = 范围[键]
@@ -122,11 +155,12 @@ def 读取配置(config: Any) -> 运行配置:
         左边界天数=整数(render, "left_offset_days", 默认.左边界天数),
         右边界天数=整数(render, "right_offset_days", 默认.右边界天数),
         提醒天数=整数(render, "remind_days", 默认.提醒天数),
-        随机背景=读取开关(render.get("random_background"), 默认.随机背景),
         指定背景=读取文本(render.get("background_file"), 默认.指定背景),
         背景目录=读取文本(render.get("background_dir"), 默认.背景目录),
         凭证面板=读取开关(panels.get("voucher"), 默认.凭证面板),
         时装面板=读取开关(panels.get("outfit"), 默认.时装面板),
         模组面板=读取开关(panels.get("module"), 默认.模组面板),
         每日自动更新=读取开关(data.get("auto_refresh_daily"), 默认.每日自动更新),
+        推送开关=读取开关(push.get("enabled"), 默认.推送开关),
+        推送时刻=规范化时刻(push.get("time")),
     )

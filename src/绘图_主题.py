@@ -30,8 +30,6 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from functools import lru_cache
-from pathlib import Path
 
 import numpy as np
 from PIL import Image as PILimage
@@ -267,22 +265,13 @@ def _建主题_计算(背景路径: str | None = None) -> 主题:
     )
 
 
-@lru_cache(maxsize=4)
-def _建主题缓存(背景路径: str, 指纹: tuple[int, int]) -> 主题:
-    return _建主题_计算(背景路径 or None)
-
-
 def 建主题(背景路径: str | None = None) -> 主题:
-    """背景图 → 整套配色（按"路径 + mtime + 大小"缓存）。
+    """背景图 → 整套配色。
 
-    整套色值完全由这一张图推导（`取候选色` 是纯 Python 的逐像素分桶，实测约 87ms），
-    同一张背景在同一天会被反复用到，所以缓存住；`主题` 是 frozen dataclass，可以安全共享。
+    整套色值完全由这一张图推导（`取候选色` 是纯 Python 的逐像素分桶，实测约 87ms）。
+
+    > 阶段四曾在这里按"路径 + mtime + 大小"缓存过（省 ~87ms）。2026-09-14 拿掉了：
+    > 签名缓存命中时**根本不会渲染**，一个进程里建主题只发生一两次，
+    > 87ms 不值得换一层"指纹忘了更新就会一直用旧配色"的缓存键（理由同 `绘图_图表.py`）。
     """
-    if not 背景路径:
-        return _建主题缓存("", (0, 0))
-    try:
-        st = Path(背景路径).stat()
-        指纹 = (st.st_mtime_ns, st.st_size)
-    except OSError:
-        指纹 = (0, 0)
-    return _建主题缓存(str(背景路径), 指纹)
+    return _建主题_计算(背景路径 or None)

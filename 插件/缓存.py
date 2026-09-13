@@ -61,7 +61,10 @@ logger = logging.getLogger("ganttknights")
 """排版内核的像素契约版本：改了会改变出图的代码就 +1（否则可能命中老缓存）。"""
 
 保留个数 = 8
-"""缓存里最多留几张图（超出丢最旧的）。一天正常只会用到 1~2 张（随机背景各一张）。"""
+"""同一天最多留几张图（超出丢最旧的）。
+
+日常是**一天一张**（背景按自然日抽签 + 次日 00:00 过期），这个上限只是给
+"用户反复改面板/标题"这种情况兜底，防止目录无限长。"""
 
 _PNG魔数 = b"\x89PNG\r\n\x1a\n"
 _JPEG魔数 = b"\xff\xd8\xff"
@@ -249,6 +252,19 @@ class 渲染缓存:
 
     def 图片路径(self, 签名: str) -> Path:
         return self.目录 / f"渲染_{签名[:16]}.jpg"
+
+    def 概况(self) -> dict:
+        """缓存现状：条数 / 占用字节 / 最新一条的生成时刻（给 `/甘特图状态` 用）"""
+        manifest = self._读manifest()
+        try:
+            字节 = sum(p.stat().st_size for p in self.目录.glob("*.jpg"))
+        except OSError:
+            字节 = 0
+        return {
+            "条数": len(manifest),
+            "字节": 字节,
+            "最新": max((v.生成时刻 for v in manifest.values()), default="无"),
+        }
 
     # ==================== 查 / 存 ====================
 
