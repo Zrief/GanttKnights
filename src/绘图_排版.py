@@ -2,7 +2,7 @@
 
 整幅图从上到下分三段，全部按像素排布（dpi 150 下 1 数据单位 = 1 像素）：
 
-  页眉  大字衬线标题 + 右侧带强调竖线的"数据来源 / 更新时间"块
+  页眉  大字粗体标题 + 右侧带强调竖线的"数据来源 / 更新时间"块
   甘特  固定宽左信息列（类型色条 + 类型关键词）+ 顶部日期轴带 + 每日竖网格
         + 贯穿全高的 TODAY 柱带；事件名优先写在条上，条太短时引到条外
   底栏  按"凭证兑换 / 新增时装 / 新增模组"分区的卡片行：近白面板 + 顶部色带标题
@@ -12,7 +12,7 @@
   1) 时间轴 = 固定宽【左侧信息列】+ 顶部深色【日期轴带】+ 每日竖网格 + 贯穿全高的
      TODAY 柱带；名称不再挤在条里，短条也读得出来。
   2) 区块 = 近白面板 + 顶部色带，标题行用反白字，缩到手机宽度也不丢分区识别度。
-  3) 页眉 = 大字衬线标题 + 右侧带强调竖线的信息块。
+  3) 页眉 = 大字粗体标题（无衬线，见 字体.py 的"为什么不用衬线"）+ 右侧带强调竖线的信息块。
   4) 底栏排版由条目数自动搜索：行数最少 → 填得最满 → 格宽最接近理想值。
 
 配色不写死：整套色值由 src.绘图_主题.建主题(背景图) 推导——色相与彩度取自图片，
@@ -25,14 +25,18 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 
+import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyBboxPatch, Rectangle
 from matplotlib.patheffects import Normal, SimplePatchShadow, withStroke
+from matplotlib.textpath import TextToPath
 from PIL import Image as PILimage
 from PIL import ImageChops, ImageDraw
 
@@ -40,7 +44,7 @@ from .config import settings
 from .绘图_图表 import 设置字体, 缩放图片
 from .绘图_颜色 import set_alpha_channel
 from .绘图_主题 import 主题
-from .字体 import 取字体目录, 等宽族, 衬线族, 注册字体
+from .字体 import 无衬线族, 等宽族, 注册字体
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +60,11 @@ logger = logging.getLogger(__name__)
 # ⚠️ 这里**不能在 import 期调用 注册字体()**：那会在加载模块时扫全部字重、重建
 # matplotlib 字体缓存（秒级阻塞）。作为 AstrBot 插件加载时会卡住事件循环。
 # 改为首次真正出图时再注册 —— 见 绘制甘特图() 里的 _确保字体就绪()。
-衬线 = 衬线族 if (取字体目录() / "NotoSerifCJKsc-Bold.otf").exists() else "Noto Serif SC"
+#
+# 标题族 = 无衬线族：**不使用衬线**（理由见 字体.py）。旧代码这里是
+# `衬线族 if (取字体目录()/"NotoSerifCJKsc-Bold.otf").exists() else "Noto Serif SC"`，
+# 在 import 期求值，且缺字体目录时会退到系统可变字体衬线（ExtraLight(200)，更细）。
+标题族 = 无衬线族
 等宽 = 等宽族
 
 # 注册前先按"无真粗体"处理：粗体() 会据此走同色描边兜底。
@@ -127,16 +135,52 @@ def 区弧度表() -> dict[str, float]:
     return {名: i / (len(名们) - 1) for i, 名 in enumerate(名们)}
 
 
-def 文本宽(s: str, 字号: float) -> float:
-    """粗略字宽：汉字/全角按 1em，西文按 0.55em"""
-    em = 字号 / 72 * DPI
-    return sum(em * (1.0 if ord(ch) > 0x2E80 else 0.55) for ch in s)
+# ============================ 文本宽度 ============================
+# 两种度量方式，用 GK_文本度量 切换（对照实验与回退用）：
+#
+#   估算（默认，改造前的行为）：汉字/全角记 1em、其余记 0.55em。
+#     快，但**与真实字形有系统性偏差**，而且偏差方向随字体翻转（实测：对随包 Noto Sans CJK
+#     的 "2026-07-01" 偏宽 5.8%，换成微软雅黑则偏窄 1.5%、混合串偏宽 11.3%）；
+#     对等宽日期标签低估 14.9%（唯一显著的偏差）。
+#   真实：交给 matplotlib 自己量（`TextToPath`，与渲染器同一条 set_text 路径、含 fallback 列表）。
+#     一次渲染只有几十次调用（活动名 + 日期刻度 + 底栏截断），实测开销可忽略。
+#
+# ⚠️ **不要**改成 `FT2Font.load_char()` 逐字取 advance：字体里缺该字形时（例如没装中文字体、
+#    只剩 DejaVu），本机实测**直接段错误 0xC0000005 把宿主进程打死**——AstrBot 会跟着挂。
+#    `get_text_width_height_descent()` 遇到缺字形只 warning，是安全的。
+字体度量方式 = os.environ.get("GK_文本度量", "估算").strip() or "估算"
 
 
-def 截到宽(s: str, 最大px: float, 字号: float) -> str:
-    if 文本宽(s, 字号) <= 最大px:
+@lru_cache(maxsize=1)
+def _度量器() -> TextToPath:
+    """TextToPath 构造要建 MathTextParser，按需创建（估算模式下一次都不建）"""
+    return TextToPath()
+
+
+@lru_cache(maxsize=4096)
+def _真实宽度(s: str, 字号: float, family: str | None, weight: str | None) -> float:
+    """按 family+weight 交给 matplotlib 量字符串宽度（px）。缓存键含字号与字重。"""
+    prop = fm.FontProperties(family=family, weight=weight, size=字号)
+    return _度量器().get_text_width_height_descent(s, prop, False)[0] * DPI / 72
+
+
+def 文本宽(s: str, 字号: float, family: str | None = None,
+           weight: str | None = None) -> float:
+    """文本宽度（px）。family/weight 只影响"真实"度量；估算式不看字体。
+
+    调用方应传入**实际绘制时用的** family/weight，否则真实度量会量错字体。
+    """
+    if 字体度量方式 != "真实":
+        em = 字号 / 72 * DPI
+        return sum(em * (1.0 if ord(ch) > 0x2E80 else 0.55) for ch in s)
+    return _真实宽度(s, 字号, family, weight)
+
+
+def 截到宽(s: str, 最大px: float, 字号: float, family: str | None = None,
+           weight: str | None = None) -> str:
+    if 文本宽(s, 字号, family, weight) <= 最大px:
         return s
-    while s and 文本宽(s + "…", 字号) > 最大px:
+    while s and 文本宽(s + "…", 字号, family, weight) > 最大px:
         s = s[:-1]
     return s + "…"
 
@@ -316,7 +360,7 @@ def 填页眉(ax, fig, 主题: 主题, 现在: datetime, 标题: str = 图标题
               interpolation="bilinear", zorder=1)
 
     # 左：标题（只留标题，去掉 kicker 与英文副标题这类装饰）
-    ax.text(30, 高 / 2, 标题, fontsize=30, color=主题.主文, family=衬线,
+    ax.text(30, 高 / 2, 标题, fontsize=30, color=主题.主文, family=标题族,
             ha="left", va="center", zorder=4, fontweight=粗字重,
             path_effects=粗体(主题.主文, 1.0))
 
@@ -428,7 +472,7 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
 
         # 名字：优先写在条里；条太短就引到条外（右优先，其次左侧）
         字色 = 主题.对色(条色)
-        名宽 = 文本宽(名, 名字号)
+        名宽 = 文本宽(名, 名字号, weight=粗字重)   # 条上的名字是无衬线粗体
         if x1 - x0 >= 名宽 + 26:
             ax.text((x0 + x1) / 2, y中, 名, fontsize=名字号, color=字色,
                     ha="center", va="center", zorder=4, clip_path=条, fontweight=粗字重,
@@ -461,7 +505,8 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         ax.add_line(Line2D([xx, xx], [顶, 轴高], color=轴色,
                            linewidth=3 if 是今天 else 1, zorder=9))
         # 每天一个刻度；只在真的放不下时才跳过（今天永远保留）
-        字宽 = 文本宽(f"{日:%m/%d}", 11)
+        # 注：文本宽度按 11 号估，实际绘制用的是 11.5 号（历史遗留，见 docs 记录）
+        字宽 = 文本宽(f"{日:%m/%d}", 11, family=等宽)
         贴左 = xx + 8 + 字宽 < 轴宽
         左 = xx + 8 if 贴左 else xx - 8 - 字宽
         if 左 < 上次右 + 6 and not 是今天:
@@ -563,7 +608,7 @@ def 填行(ax, fig, 行: list[tuple], 格宽px: float, 主题: 主题) -> None:
                        zorder=1.2, interpolation="bilinear", origin="lower")
         带.set_clip_path(卡)          # 让色带跟着圆角收紧，不然四角会冒出去
         ax.text(起px + 16, 题下y + 标题行px / 2, 标签, fontsize=15,
-                color=主题.对色(色), family=衬线, ha="left", va="center", zorder=3,
+                color=主题.对色(色), family=标题族, ha="left", va="center", zorder=3,
                 fontweight=粗字重, path_effects=粗体(主题.对色(色), 0.9))
 
         for j, 条目 in enumerate(条目们):
