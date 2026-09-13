@@ -91,6 +91,17 @@ def test_tags_形状正确(元数据):
     assert len(标签) <= 10, f"标签过多（{len(标签)} 个）——市场里多数插件写 1~3 个"
 
 
+def test_tags_给游戏名与产物类型各留一个英文入口(元数据):
+    """市场检索按标签字面匹配，同一件事的中英文是两个检索入口（§18.4）。
+
+    只给"游戏名 + 产物类型"配英文；`游戏/图片/推送` 这类通用词不配（配上只是稀释信息量）。
+    """
+    标签 = set(元数据["tags"])
+    for 中文, 英文 in (("明日方舟", "arknights"), ("甘特图", "gantt")):
+        assert 中文 in 标签, f"缺中文标签 {中文}"
+        assert 英文 in 标签, f"缺对应的英文标签 {英文}（{中文} 的检索入口）"
+
+
 def test_astrbot_版本表达式合法且包含_4_17(元数据):
     from packaging.specifiers import SpecifierSet   # pytest 的依赖，必然存在
 

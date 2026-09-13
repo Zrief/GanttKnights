@@ -27,8 +27,10 @@ support_platforms:
   - aiocqhttp
 tags:
   - 明日方舟
+  - arknights
   - PRTS
   - 游戏
   - 图片
   - 推送
   - 甘特图
+  - gantt
