@@ -41,10 +41,10 @@ from PIL import Image as PILimage
 from PIL import ImageChops, ImageDraw
 
 from .config import settings
-from .绘图_图表 import 设置字体, 缩放图片
+from .绘图_图表 import 缩放图片
 from .绘图_颜色 import set_alpha_channel
 from .绘图_主题 import 主题
-from .字体 import 无衬线族, 等宽族, 注册字体
+from .字体 import 注册字体
 
 logger = logging.getLogger(__name__)
 
@@ -61,29 +61,31 @@ logger = logging.getLogger(__name__)
 # matplotlib 字体缓存（秒级阻塞）。作为 AstrBot 插件加载时会卡住事件循环。
 # 改为首次真正出图时再注册 —— 见 绘制甘特图() 里的 _确保字体就绪()。
 #
-# 标题族 = 无衬线族：**不使用衬线**（理由见 字体.py）。旧代码这里是
-# `衬线族 if (取字体目录()/"NotoSerifCJKsc-Bold.otf").exists() else "Noto Serif SC"`，
-# 在 import 期求值，且缺字体目录时会退到系统可变字体衬线（ExtraLight(200)，更细）。
-标题族 = 无衬线族
-等宽 = 等宽族
+# 标题族 / 等宽 / 真粗体：**首次出图时**由 字体.注册字体() 的解析结果覆盖（见 _确保字体就绪()）。
+# 这里给的是"还没解析"时的占位值——解析一定发生在任何绘制之前。
+# 不使用衬线：标题与底栏分区标签也用无衬线（理由见 字体.py）。
+标题族 = "Noto Sans CJK SC"
+等宽 = "Noto Sans Mono"
 
 # 注册前先按"无真粗体"处理：粗体() 会据此走同色描边兜底。
-# 这两个值在首次出图前由 _确保字体就绪() 改写，而那一定发生在任何绘制之前。
 真粗体 = False
 粗字重 = "normal"
 _字体就绪 = False
 
 
 def _确保字体就绪() -> None:
-    """首次出图时注册字体（幂等），并据此设定真粗体 / 粗字重。
+    """首次出图时注册字体并落地角色字体（幂等）。
 
     必须在真正画字之前调用：matplotlib 在 draw 时按 family 名解析字体，
     仅设置 rcParams 而不注册文件是找不到 字体/ 下那几支静态字重的。
     """
-    global _字体就绪, 真粗体, 粗字重
+    global _字体就绪, 标题族, 等宽, 真粗体, 粗字重
     if _字体就绪:
         return
-    真粗体 = 注册字体()
+    方案 = 注册字体()
+    标题族 = 方案.无衬线族
+    等宽 = 方案.等宽族
+    真粗体 = 方案.真粗体
     粗字重 = "bold" if 真粗体 else "normal"
     _字体就绪 = True
 
@@ -306,7 +308,6 @@ def 压暗系数(底图: np.ndarray, 深底色: str) -> float:
 def 建分区画布(事件数: int, 行数: int, 主题: 主题, 背景路径: str | Path):
     """从上到下：页眉、甘特图、行数 行底栏。每段高度按像素给定，
     再用 0 间距的 GridSpec 精确落位（height_ratios 的一个单位 = 一个像素）"""
-    设置字体()
     plt.rcParams["font.size"] = 10
     甘特高px = 甘特轴带px + max(事件数, 1) * 甘特行高px + 甘特底px
     比例 = [页眉高px, 页眉间距px, 甘特高px, 甘特间距px]

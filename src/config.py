@@ -72,6 +72,12 @@ class Settings:
     字体目录: Path | None = None
     font_family: str = "Noto Sans CJK SC"
     font_path: str | None = None
+    额外字体: dict[str, str] | None = None
+    """角色 → 字体文件：{"正文": …, "粗体": …, "等宽": …}。
+
+    插件层用它接入 AstrBot 的自定义字体插槽（`data/font.ttf` / `font-bold.ttf` / `font-mono.ttf`）；
+    也可以用环境变量 `GK_EXTRA_FONT_DIR` 指向一个放着这三个文件名的目录（CLI/排查用）。
+    """
 
     def __post_init__(self) -> None:
         # 默认值走环境变量兜底，再由构造参数覆盖
@@ -112,6 +118,16 @@ class Settings:
                                or (素材目录 / "Gantt.jpg"))
         self.bg_dir = str(self.bg_dir or env["bg_dir"] or (素材目录 / "背景图"))
         self.font_path = self.font_path or str(字体目录 / "NotoSansCJKsc-Regular.otf")
+
+        # 额外字体（角色 → 文件）：显式传入优先，其次 GK_EXTRA_FONT_DIR 目录下的三个约定名
+        if self.额外字体 is None:
+            额外目录 = _env路径("GK_EXTRA_FONT_DIR")
+            约定 = (("正文", "font.ttf"), ("粗体", "font-bold.ttf"), ("等宽", "font-mono.ttf"))
+            if 额外目录:
+                self.额外字体 = {角色: str(额外目录 / 名) for 角色, 名 in 约定
+                                 if (额外目录 / 名).exists()} or None
+        elif not self.额外字体:
+            self.额外字体 = None
 
 
 # 模块级单例：CLI 与插件在未注入时都用它（行为与改造前一致）

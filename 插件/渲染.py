@@ -33,9 +33,13 @@ logger = logging.getLogger("ganttknights")
 class 渲染服务:
     """按插件侧路径与配置驱动内核；同一实例可被多个会话共享。"""
 
-    def __init__(self, 插件目录: Path, 数据目录: Path) -> None:
+    def __init__(self, 插件目录: Path, 数据目录: Path,
+                 额外字体: dict[str, str] | None = None) -> None:
         self.插件目录 = Path(插件目录)
         self.数据目录 = Path(数据目录)
+        # AstrBot 文档化的自定义字体插槽（data/font.ttf 等），由入口层按实例路径算好传进来；
+        # 内核不认识 AstrBot，只收"角色 → 文件"。
+        self.额外字体 = 额外字体 or None
         # 锁在事件循环里首次使用时才绑定循环（Python 3.10+ 的 Lock 不再在构造期绑定），
         # 这里构造于插件加载期也安全。
         self._锁 = asyncio.Lock()
@@ -69,6 +73,7 @@ class 渲染服务:
             output_path=str(self.数据目录 / "Gantt.jpg"),
             字体目录=运行配置.字体目录 or None,
             bg_dir=运行配置.背景目录 or None,
+            额外字体=self.额外字体,
             api_limit=运行配置.api上限,
             left_offset_days=运行配置.左边界天数,
             right_offset_days=运行配置.右边界天数,

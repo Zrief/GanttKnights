@@ -38,6 +38,18 @@ PLUGIN_NAME = "astrbot_plugin_ganttknights"
 """与 metadata.yaml 的 version 一致（帮助页会显示它）。"""
 
 
+def _额外字体(数据根: Path | None = None) -> dict[str, str]:
+    """AstrBot 文档化的自定义字体插槽：`data/font.ttf` / `font-bold.ttf` / `font-mono.ttf`。
+
+    官方提示原文："当使用 local 时，将 ttf 字体命名为 'font.ttf' 放在 data/ 目录下可自定义字体"
+    （`astrbot/core/config/default.py` 的 t2i_strategy 说明）。三个名字按角色排：
+    正文 / 粗体 / 等宽——存在哪个收哪个，内核把它插到候选表最前面。
+    """
+    根 = Path(数据根) if 数据根 is not None else Path(get_astrbot_data_path())
+    约定 = (("正文", "font.ttf"), ("粗体", "font-bold.ttf"), ("等宽", "font-mono.ttf"))
+    return {角色: str(根 / 名) for 角色, 名 in 约定 if (根 / 名).exists()}
+
+
 class GanttKnightsPlugin(Star):
     """指令 + 生命周期；渲染细节全部委托给 `渲染服务`。"""
 
@@ -53,7 +65,8 @@ class GanttKnightsPlugin(Star):
         插件名 = getattr(self, "name", None) or PLUGIN_NAME
         self.data_dir = Path(get_astrbot_data_path()) / "plugin_data" / 插件名
 
-        self.渲染 = 渲染服务(插件目录=self.plugin_dir, 数据目录=self.data_dir)
+        self.渲染 = 渲染服务(插件目录=self.plugin_dir, 数据目录=self.data_dir,
+                             额外字体=_额外字体())
         # 构造期只准备缓存目录与环境变量，不 import matplotlib（那会阻塞加载 1s 以上）
         self.mplconfig_dir = self.渲染.准备matplotlib环境()
 
