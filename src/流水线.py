@@ -211,6 +211,21 @@ def 读取新增内容() -> dict:
         return {}
 
 
+def 筛选底栏分区(新增内容: dict, 底栏分区: tuple[str, ...] | None) -> dict:
+    """只保留要展示的底栏分区：未选中的板块置空 → 底栏不画它，警告也不再提它。
+
+    参数用 绘图_排版.区名表 里的名字（"凭证兑换" / "新增时装" / "新增模组"）；
+    None = 三个都要，原样返回（默认路径行为不变）。
+    置空（而不是删键）是为了让 `建分区()` 与 `生成警告()` 的"空板块"处理照旧生效。
+    """
+    if 底栏分区 is None:
+        return 新增内容
+    from .绘图_排版 import 新增键, 区名表
+
+    保留 = {新增键[名] for 名 in 区名表 if 名 in 底栏分区}
+    return {**新增内容, **{键: [] for 键 in 新增键.values() if 键 not in 保留}}
+
+
 def 布置头像(分区: list[tuple[str, list[dict]]]) -> None:
     """底栏条目的头像补齐到 数据/图片缓存/（已存在的跳过），失败只记数不中断"""
     缓存目录 = Path(settings.icon_cache_dir)
@@ -235,6 +250,7 @@ def render_once(
     背景路径: str | Path | None = None,
     标题: str = _DEFAULT_TITLE,
     提醒天数: int = 3,
+    底栏分区: tuple[str, ...] | None = None,
     控制台打印警告: bool = True,
 ) -> 渲染结果:
     """数据 → 图片 + 警告。不碰 argparse，也不判断"今天要不要爬"。
@@ -247,6 +263,8 @@ def render_once(
         背景路径      : None 时从 settings.bg_dir 随机取一张
         标题          : 图片主标题
         提醒天数      : 过期警告的提醒窗口
+        底栏分区      : 要展示的底栏分区（"凭证兑换"/"新增时装"/"新增模组"）；
+                        None = 三个都展示（默认）。未选中的区不画，警告里也不提。
         控制台打印警告: 是否把警告同时打到 stdout（CLI 用；插件应关掉）
     """
     现在时间 = 现在时间 or datetime.now()
@@ -255,7 +273,7 @@ def render_once(
 
     # 重依赖按需导入：matplotlib 只在这里被拖进来，而 render_once 由入口层
     # 放进 asyncio.to_thread 执行，因此这 1s 左右的导入不会卡住事件循环。
-    from .绘图_排版 import 建分区, 绘制甘特图
+    from .绘图_排版 import 建分区, 绘制甘特图, 新增键
     from .绘图_主题 import 建主题
 
     # 可选的数据刷新（策略由调用方决定，这里只执行）
@@ -284,8 +302,8 @@ def render_once(
     背景 = 挑选背景图(背景路径)
     主题 = 建主题(背景)
 
-    # 底栏上新区（凭证/时装/模组）
-    新增内容 = 读取新增内容()
+    # 底栏上新区（凭证/时装/模组）——按调用方的开关裁剪
+    新增内容 = 筛选底栏分区(读取新增内容(), 底栏分区)
     分区 = 建分区(新增内容)
     try:
         布置头像(分区)
@@ -322,6 +340,6 @@ def render_once(
         警告=警告,
         标题=标题,
         条目数=len(记录),
-        名称数=sum(len(新增内容.get(k) or []) for k in _WARN_SECTIONS),
+        名称数=sum(len(新增内容.get(新增键[k]) or []) for k in _WARN_SECTIONS),
         分区计数={区名: len(条目们) for 区名, 条目们 in 分区},
     )

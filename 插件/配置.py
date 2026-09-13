@@ -30,6 +30,10 @@ from typing import Any
 
 真值串 = {"1", "true", "yes", "on", "是", "真", "开"}
 
+# 底栏三个分区的名字。**必须与 `src/绘图_排版.py` 的 `区名表` 一致**——加载期不能 import
+# 那个模块（它会拖进 matplotlib，1s 级阻塞），只能在这里复制一份，靠验证脚本钉住契约。
+底栏区名 = ("凭证兑换", "新增时装", "新增模组")
+
 
 @dataclass(frozen=True, slots=True)
 class 运行配置:
@@ -43,6 +47,10 @@ class 运行配置:
     复用窗口秒: int = 60
     随机背景: bool = True
     指定背景: str = ""
+    # panels
+    凭证面板: bool = True
+    时装面板: bool = True
+    模组面板: bool = True
     # data
     每日自动更新: bool = True
     api上限: int = 50
@@ -50,6 +58,12 @@ class 运行配置:
     # assets
     字体目录: str = ""
     背景目录: str = ""
+
+    def 底栏分区(self) -> tuple[str, ...] | None:
+        """要展示的底栏分区；三个都开时返回 None（走内核默认路径，行为与改造前一致）。"""
+        开着 = tuple(名 for 名, 显示 in zip(底栏区名, (self.凭证面板, self.时装面板, self.模组面板),
+                                            strict=True) if 显示)
+        return None if len(开着) == len(底栏区名) else 开着
 
 
 def 读取节(config: Any, 节名: str) -> dict[str, Any]:
@@ -98,6 +112,7 @@ def 读取配置(config: Any) -> 运行配置:
     """
     默认 = 运行配置()
     render = 读取节(config, "render")
+    panels = 读取节(config, "panels")
     data = 读取节(config, "data")
     assets = 读取节(config, "assets")
 
@@ -113,6 +128,9 @@ def 读取配置(config: Any) -> 运行配置:
         复用窗口秒=整数(render, "reuse_seconds", 默认.复用窗口秒),
         随机背景=读取开关(render.get("random_background"), 默认.随机背景),
         指定背景=读取文本(render.get("background_file"), 默认.指定背景),
+        凭证面板=读取开关(panels.get("voucher"), 默认.凭证面板),
+        时装面板=读取开关(panels.get("outfit"), 默认.时装面板),
+        模组面板=读取开关(panels.get("module"), 默认.模组面板),
         每日自动更新=读取开关(data.get("auto_refresh_daily"), 默认.每日自动更新),
         api上限=整数(data, "api_limit", 默认.api上限),
         未来缓冲小时=整数(data, "future_buffer_hours", 默认.未来缓冲小时),

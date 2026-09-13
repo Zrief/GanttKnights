@@ -55,6 +55,28 @@
       }
     }
   },
+  "panels": {
+    "description": "底栏面板",
+    "type": "object",
+    "hint": "控制底栏三个上新区是否出现在图里。关掉的区不会画，过期提醒文案里也不会再提它。",
+    "items": {
+      "voucher": {
+        "description": "展示「凭证兑换」面板",
+        "type": "bool",
+        "default": true
+      },
+      "outfit": {
+        "description": "展示「新增时装」面板",
+        "type": "bool",
+        "default": true
+      },
+      "module": {
+        "description": "展示「新增模组」面板",
+        "type": "bool",
+        "default": true
+      }
+    }
+  },
   "data": {
     "description": "数据源",
     "type": "object",
