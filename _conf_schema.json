@@ -2,7 +2,7 @@
   "render": {
     "description": "出图",
     "type": "object",
-    "hint": "影响画面内容的参数。数值范围由后端强制夹取；这里的 minimum/maximum 只是文档，AstrBot 的原生配置渲染器不读它们。",
+    "hint": "影响画面的参数。数值范围由后端强制夹取；这里的 minimum/maximum 只是文档，表单不读它们。",
     "items": {
       "title": {
         "description": "图片主标题",
@@ -23,7 +23,7 @@
         "default": 22,
         "minimum": 7,
         "maximum": 30,
-        "hint": "图上显示今天之后多少天；实际右边界会对齐到当周周日。建议 ≤30：再长时一条活动的色条会被压得很窄，名字与日期刻度的摆放判定开始贴边（实测 35 天余量已到 0~4px）。"
+        "hint": "图上显示今天之后多少天；实际右边界会对齐到当周周日。上限 30：再长时一条活动的色条会被压得很窄，名字与日期刻度的摆放判定开始贴边（实测 35 天余量已到 0~4px）。"
       },
       "remind_days": {
         "description": "过期提醒天数",
@@ -31,7 +31,7 @@
         "default": 3,
         "minimum": 1,
         "maximum": 30,
-        "hint": "警告文案里提前多少天提醒即将结束的活动。"
+        "hint": "提醒文案里提前多少天提醒即将结束的活动。"
       },
       "reuse_seconds": {
         "description": "出图复用窗口（秒）",
@@ -45,20 +45,26 @@
         "description": "随机背景图",
         "type": "bool",
         "default": true,
-        "hint": "关闭后固定使用背景图目录里的第一张（出图更稳定，也更容易命中后续版本的缓存）。"
+        "hint": "开启：每次随机取一张；关闭且未指定文件：固定用背景图目录里的第一张（出图可复现）。"
       },
       "background_file": {
         "description": "指定背景图文件",
         "type": "string",
         "default": "",
-        "hint": "背景图目录内的文件名（如 沉沦者.WEBP），也可写绝对路径；留空时按上一项处理。"
+        "hint": "背景图目录内的文件名（如 沉沦者.WEBP），也可写绝对路径；填了就忽略上一项。"
+      },
+      "background_dir": {
+        "description": "背景图目录",
+        "type": "string",
+        "default": "",
+        "hint": "留空 = 插件自带的 背景图/ 目录（两张示例图）。换成自己的图建议放到 data/plugin_data/astrbot_plugin_ganttknights/ 下再指过来——插件升级不会覆盖那里。"
       }
     }
   },
   "panels": {
     "description": "底栏面板",
     "type": "object",
-    "hint": "控制底栏三个上新区是否出现在图里。关掉的区不会画，过期提醒文案里也不会再提它。",
+    "hint": "控制底栏三个上新区是否出现在图里。关掉的区不会画，提醒文案里也不会再提它。",
     "items": {
       "voucher": {
         "description": "展示「凭证兑换」面板",
@@ -80,48 +86,13 @@
   "data": {
     "description": "数据源",
     "type": "object",
-    "hint": "数据来自 PRTS Wiki，需要网络。",
+    "hint": "数据来自 PRTS Wiki，需要网络。请求条数与「进行中」判定的小时宽限是内部旋钮，不在这里暴露（内核默认 50 条 / 4 小时，可用 GK_API_LIMIT / GK_FUTURE_BUFFER_HOURS 覆盖）。",
     "items": {
       "auto_refresh_daily": {
         "description": "每天首次出图时自动更新数据",
         "type": "bool",
         "default": true,
         "hint": "关闭后只出图不爬取，数据靠自己跑 python cli.py --force 更新。"
-      },
-      "api_limit": {
-        "description": "PRTS 活动查询条数上限",
-        "type": "int",
-        "default": 50,
-        "minimum": 10,
-        "maximum": 200,
-        "hint": "全年活动约 40 个，默认值一次就能查全。"
-      },
-      "future_buffer_hours": {
-        "description": "进行中判定的宽限小时数",
-        "type": "int",
-        "default": 4,
-        "minimum": 0,
-        "maximum": 24,
-        "hint": "开始时间早于当前时间但不超过该小时数的条目也算“进行中”。"
-      }
-    }
-  },
-  "assets": {
-    "description": "素材路径",
-    "type": "object",
-    "hint": "留空表示用插件目录里的默认位置。字体文件不在仓库里，需按 OFL-1.1 自行放置（见 README）。",
-    "items": {
-      "font_dir": {
-        "description": "字体目录",
-        "type": "string",
-        "default": "",
-        "hint": "留空 = 插件目录/字体；缺字体会回退到系统中文字体。"
-      },
-      "bg_dir": {
-        "description": "背景图目录",
-        "type": "string",
-        "default": "",
-        "hint": "留空 = 插件目录/背景图；目录为空时无法出图。"
       }
     }
   }

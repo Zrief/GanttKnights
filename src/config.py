@@ -34,12 +34,28 @@ ENV_素材目录 = "GK_ASSET_DIR"
 ENV_字体目录 = "GK_FONT_DIR"
 ENV_输出路径 = "GK_OUTPUT_PATH"
 ENV_背景目录 = "GK_BG_DIR"
+ENV_API条数 = "GK_API_LIMIT"
+ENV_宽限小时 = "GK_FUTURE_BUFFER_HOURS"
 
 
 def _env路径(名: str) -> Path | None:
     """读一个目录/文件型环境变量；未设置或为空则返回 None"""
     值 = os.environ.get(名, "").strip()
     return Path(值) if 值 else None
+
+
+def _env整数(名: str, 默认: int) -> int:
+    """读一个整数型环境变量；未设置 / 不是整数则返回默认值
+
+    给"不进 `_conf_schema` 的高级旋钮"留一个可调口（排查用），例如请求条数与宽限小时数。
+    """
+    值 = os.environ.get(名, "").strip()
+    if not 值:
+        return 默认
+    try:
+        return int(值)
+    except ValueError:
+        return 默认
 
 
 @dataclass
@@ -63,6 +79,8 @@ class Settings:
     bg_dir: str | None = None
 
     # —— 时间窗 / 请求量 ——
+    # api_limit 与 future_buffer_hours **不进 `_conf_schema`**（高级旋钮，普通用户不需要），
+    # 但仍可用 GK_API_LIMIT / GK_FUTURE_BUFFER_HOURS 或构造参数覆盖（排查用）。
     api_limit: int = 50  # 全年活动约 40 个，一次 ask 查全，无需再补活动一览
     left_offset_days: int = 3
     right_offset_days: int = 22
@@ -128,6 +146,11 @@ class Settings:
                                  if (额外目录 / 名).exists()} or None
         elif not self.额外字体:
             self.额外字体 = None
+
+        # 两个高级旋钮（不进 _conf_schema）：GK_* 环境变量优先于默认值。
+        # dataclass 分不清"没传"与"传了默认值"，所以这里以环境变量为准——它们本来只给排查用。
+        self.api_limit = _env整数(ENV_API条数, self.api_limit)
+        self.future_buffer_hours = _env整数(ENV_宽限小时, self.future_buffer_hours)
 
 
 # 模块级单例：CLI 与插件在未注入时都用它（行为与改造前一致）

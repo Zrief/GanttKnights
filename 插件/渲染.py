@@ -64,20 +64,18 @@ class 渲染服务:
 
         - 数据（CSV/预告/图标缓存/警告/产物）全在 `data/plugin_data/<插件名>/`
           ——用户数据与代码分离，升级插件不覆盖；
-        - 素材（字体/背景图）在插件目录内，只读；
-        - 时间窗与请求量来自插件配置，用户一改就生效（阶段四会并入缓存签名）。
+        - 素材（字体/背景图）默认在插件目录内只读；背景图可被配置指到别处（插件升级不会覆盖）；
+        - 字体不在插件配置里暴露：自定义走插件目录 `字体/` 或 AstrBot 的 `data/font*.ttf` 约定；
+        - 时间窗来自插件配置，用户一改就生效（阶段四会并入缓存签名）。
         """
         return Settings(
             数据目录=self.数据目录,
             素材目录=self.插件目录,
             output_path=str(self.数据目录 / "Gantt.jpg"),
-            字体目录=运行配置.字体目录 or None,
             bg_dir=运行配置.背景目录 or None,
             额外字体=self.额外字体,
-            api_limit=运行配置.api上限,
             left_offset_days=运行配置.左边界天数,
             right_offset_days=运行配置.右边界天数,
-            future_buffer_hours=运行配置.未来缓冲小时,
         )
 
     def 应用设置(self, 运行配置: 运行配置) -> Settings:

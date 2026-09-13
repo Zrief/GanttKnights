@@ -11,6 +11,11 @@
 
 配置键用英文 snake_case（AstrBot 惯例，也便于 WebUI/HTTP 接口处理），
 节名与 `_conf_schema.json` 的顶层键一一对应。
+
+**只暴露"用户真的会调"的东西**（2026-09-14 瘦身）：字体不再进配置——自定义字体走两条既有路径
+（插件目录 `字体/`，或 AstrBot 约定 `data/font.ttf` / `font-bold.ttf` / `font-mono.ttf`），
+见 docs/插件化路线.md §5.4；请求条数与"进行中"宽限小时数也退到内核默认值（GK_* 可覆盖），
+它们只会让用户把图配错。
 """
 
 from __future__ import annotations
@@ -24,8 +29,6 @@ from typing import Any
     "right_offset_days": (7, 30),   # 上限 30：再长时色条被压窄，名字/刻度判定开始贴边（实测见文档）
     "remind_days": (1, 30),
     "reuse_seconds": (0, 3600),
-    "api_limit": (10, 200),
-    "future_buffer_hours": (0, 24),
 }
 
 真值串 = {"1", "true", "yes", "on", "是", "真", "开"}
@@ -47,17 +50,13 @@ class 运行配置:
     复用窗口秒: int = 60
     随机背景: bool = True
     指定背景: str = ""
+    背景目录: str = ""
     # panels
     凭证面板: bool = True
     时装面板: bool = True
     模组面板: bool = True
     # data
     每日自动更新: bool = True
-    api上限: int = 50
-    未来缓冲小时: int = 4
-    # assets
-    字体目录: str = ""
-    背景目录: str = ""
 
     def 底栏分区(self) -> tuple[str, ...] | None:
         """要展示的底栏分区；三个都开时返回 None（走内核默认路径，行为与改造前一致）。"""
@@ -114,7 +113,6 @@ def 读取配置(config: Any) -> 运行配置:
     render = 读取节(config, "render")
     panels = 读取节(config, "panels")
     data = 读取节(config, "data")
-    assets = 读取节(config, "assets")
 
     def 整数(节: dict[str, Any], 键: str, 默认值: int) -> int:
         最小, 最大 = 范围[键]
@@ -128,12 +126,9 @@ def 读取配置(config: Any) -> 运行配置:
         复用窗口秒=整数(render, "reuse_seconds", 默认.复用窗口秒),
         随机背景=读取开关(render.get("random_background"), 默认.随机背景),
         指定背景=读取文本(render.get("background_file"), 默认.指定背景),
+        背景目录=读取文本(render.get("background_dir"), 默认.背景目录),
         凭证面板=读取开关(panels.get("voucher"), 默认.凭证面板),
         时装面板=读取开关(panels.get("outfit"), 默认.时装面板),
         模组面板=读取开关(panels.get("module"), 默认.模组面板),
         每日自动更新=读取开关(data.get("auto_refresh_daily"), 默认.每日自动更新),
-        api上限=整数(data, "api_limit", 默认.api上限),
-        未来缓冲小时=整数(data, "future_buffer_hours", 默认.未来缓冲小时),
-        字体目录=读取文本(assets.get("font_dir"), 默认.字体目录),
-        背景目录=读取文本(assets.get("bg_dir"), 默认.背景目录),
     )
