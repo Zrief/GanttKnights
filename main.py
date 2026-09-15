@@ -9,8 +9,8 @@
 
 设计要点（详见 docs/插件化路线.md）：
 
-* **加载期不碰重依赖**：matplotlib 只在工作线程里被导入（§5.5），
-  `initialize()` 立即返回，不会拖慢 AstrBot 启动；
+* **导入期只碰 matplotlib 一个重依赖**：它在顶层就被 import（缺依赖时宿主据此自动装依赖，§19），
+  而 pyplot 与绘图模块仍留在渲染线程里（§5.5），`initialize()` 立即返回；
 * **一切阻塞都在 `asyncio.to_thread` 里**：渲染是秒级 CPU 占用，取数是同步 httpx（§5.6）；
 * **数据与代码分家**：数据写 `data/plugin_data/<插件名>/`（官方 storage 写法），
   字体/背景图留在插件目录里只读（§5.3）；
@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -32,13 +33,31 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-from .插件 import 文案
-from .插件.配置 import 读取配置
-from .插件.指令 import 刷新命令, 帮助命令, 甘特图命令, 状态命令, 初始化命令, 生成帮助文本
-from .插件.渲染 import 素材缺失, 渲染服务
-from .插件.推送 import 推送状态, 推送服务
-
 PLUGIN_NAME = "astrbot_plugin_ganttknights"
+
+# ==================== 依赖：按生态的约定俗成来（2026-09-15 定，见 docs/插件化路线.md §19）====================
+#
+# **matplotlib 在导入期就 import**：宿主唯一会替插件装依赖的时刻，就是"插件导入抛
+# `ModuleNotFoundError`"的时候（`core/star/star_manager.py` 的
+# `_import_plugin_with_dependency_recovery`：预检 requirements.txt → pip 装缺的 → 重试导入）。
+# 顶层 import 它 = 缺依赖时导入失败 = 宿主自动装好再重试，用户零操作——和生态里 9/13 的插件同形。
+#
+# ⚠️ `MPLCONFIGDIR` 必须在 matplotlib **首次导入之前**设好（§5.5）：容器/只读环境里默认配置目录
+# 不可写，会报错或反复重建字体缓存。
+#
+# 🚫 这两行（环境变量 + import）是**功能性的**，不是装饰：删掉之后一切照常运行，只是"缺依赖"会
+# 重新变成用户要自己处理的故障（`tests/test_入口契约.py` 钉着它们和它们的先后顺序）。
+_mplconfig = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME / "mplconfig"
+_mplconfig.mkdir(parents=True, exist_ok=True)
+os.environ["MPLCONFIGDIR"] = str(_mplconfig)
+
+import matplotlib  # noqa: E402,F401  —— 导入本身即"检查依赖"，别删
+
+from .插件 import 文案  # noqa: E402
+from .插件.配置 import 读取配置  # noqa: E402
+from .插件.指令 import 刷新命令, 帮助命令, 甘特图命令, 状态命令, 初始化命令, 生成帮助文本  # noqa: E402
+from .插件.渲染 import 素材缺失, 渲染服务  # noqa: E402
+from .插件.推送 import 推送状态, 推送服务  # noqa: E402
 
 插件版本 = "0.1.0"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""

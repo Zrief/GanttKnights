@@ -56,18 +56,41 @@ python prts_scraper.py               # 只爬取活动数据并在控制台打�
 
 可选素材：`背景图/` 放任意背景图（**每天按日期固定取一张**，也可以在配置里指定某一张；整套色系由它推导）；字体 `字体/NotoSansCJKsc-Regular.otf` 等静态字重不在仓库里——**缺失时会按平台回退到系统中文字体**（Windows 微软雅黑 / macOS 苹方 / Linux Noto CJK），若你按 AstrBot 的约定把 ttf 命名为 `font.ttf` 放进 `data/` 目录，那支字体会被优先使用。
 
+## 故障排查
+
+**群里回「甘特图生成失败了」，日志里是 `ModuleNotFoundError: No module named 'matplotlib'`**
+
+插件能加载、指令能回话，只是画不出图——**AstrBot 的解释器里没装本插件的依赖**。
+原因：AstrBot 只在「从市场 / 仓库 URL 安装」「上传 zip 安装」「更新插件」「插件导入失败后修复、重载」时
+才会自动跑插件的 `requirements.txt`；**普通的加载与重载都不跑**（`core/star/star_manager.py`）。
+
+正常情况下你**不需要**动手：`main.py` 在导入期就 `import matplotlib`（先设好 `MPLCONFIGDIR`），
+缺依赖时插件的导入会失败，AstrBot 收到这个信号后会自己执行 `requirements.txt`、装好再重试导入——
+走的是你自己配置的 PyPI 镜像与 AstrBot 的核心依赖约束。若依赖装不上（比如网络不通），插件会在仪表盘
+显示加载失败，点错误提示里的「尝试一键重载修复」即会先装依赖再加载；也可以手动装：
+
+1. 在 AstrBot 插件页里用「从仓库安装 / 上传 zip」**重装一次**本插件——这条安装路径会顺带装依赖
+   （若提示目录已存在，先删掉 `data/plugins/astrbot_plugin_ganttknights`；`data/plugin_data/` 里的数据不会被删）；
+2. 或装进 **AstrBot 的解释器**（不是系统 Python）：
+
+```powershell
+& "<AstrBot 安装目录>\Scripts\python.exe" -m pip install -r "<插件目录>\requirements.txt"
+```
+
+装完重载插件（或重启 AstrBot）。
+
 ## 开发与测试
 
 零依赖测试（不需要 AstrBot、不需要 matplotlib、不联网）：
 
 ```bash
 pip install pytest apscheduler      # apscheduler 已在 requirements.txt 里；pytest 是开发用
-pytest -q                           # tests/ 下五个文件：配置契约 / 元数据契约 / 时间解析 / 数据日差 / 推送
+pytest -q                           # tests/ 下六个文件：配置契约 / 元数据契约 / 入口契约 / 时间解析 / 数据日差 / 推送
 ```
 
 `tests/` 钉住的是**契约**而不是业务：配置字段与 README 一致、越界值被夹取、
-`metadata.yaml` 的必填字段/平台白名单/版本三处一致、公告年份按父活动时间窗推断、
-日差语义、推送目标与幂等记账。
+`metadata.yaml` 的必填字段/平台白名单/版本三处一致、入口的 `import matplotlib` 与 `MPLCONFIGDIR` 顺序、
+公告年份按父活动时间窗推断、日差语义、推送目标与幂等记账。
 需要真实 AstrBot 的端到端检查（模拟实例加载插件、真渲染、真抓取）不在仓库里，属于本地验证脚本。
 
 ## 许可与素材来源

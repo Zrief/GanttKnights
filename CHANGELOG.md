@@ -42,5 +42,8 @@
 
 - 剿灭、保全等长期任务检测不出来（日常增量会跳过已结束活动的公告页）
 - 公告年份解析错误，导致复刻/长期活动被排到错误的年份
+- **缺依赖时不再"能加载但画不出图"**：`main.py` 导入期就 `import matplotlib`，缺依赖时插件的导入会失败，
+  AstrBot 据此自动执行 `requirements.txt`、装好再重试导入（走你自己配置的 PyPI 镜像与核心依赖约束）。
+  此前是"插件照常加载、第一次出图才报错"，原因只埋在日志里
 
 [0.1.0]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.0
