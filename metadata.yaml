@@ -18,7 +18,7 @@ desc: |
   想停掉某个群的推送，把那个会话从推送目标列表里删掉即可。
 
   **可调**：时间窗左右范围、底栏三个面板的画/不画、背景图、推送时刻，都在插件配置里。
-version: 0.1.0
+version: 0.1.1
 author: Zrief
 repo: https://github.com/Zrief/GanttKnights
 astrbot_version: ">=4.17.0"

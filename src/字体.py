@@ -19,7 +19,7 @@
    `astrbot/core/utils/t2i/local_strategy.py:34-111`）：Windows 微软雅黑、macOS 苹方 / Hiragino、
    Linux 与官方 Docker 镜像的 Noto CJK。
 
-不使用衬线（2026-09 决定，理由见 docs §5.4）：衬线只用在页眉标题与底栏分区标签两处，
+不使用衬线（2026-09 决定，理由见 docs §5）：衬线只用在页眉标题与底栏分区标签两处，
 而所有候选字体的汉字 advance 都是 1.000em，换族对版面零影响，少依赖一支 25MB 的字体文件。
 
 `真粗体` 的判定

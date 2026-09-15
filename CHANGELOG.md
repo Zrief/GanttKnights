@@ -5,7 +5,24 @@
 > AstrBot WebUI 插件页的「更新日志」按钮读的就是本文件（`dashboard/services/plugin_service.py`
 > 会在插件目录里找 `CHANGELOG.md`），所以**每个版本都要在这里留一段**。
 
-## [0.1.0] - 2026-09-14
+## [0.1.1] - 2026-09-15
+
+### 修复
+
+- **缺依赖时不再"能加载但画不出图"**：`main.py` 在导入期就 `import matplotlib`（前面先设好
+  `MPLCONFIGDIR`），缺依赖时插件的**导入会失败**，AstrBot 据此自动执行 `requirements.txt`、
+  装好再重试导入（走你自己配置的 PyPI 镜像与 AstrBot 的核心依赖约束），用户零操作。
+  此前是"插件照常加载、第一次出图才报 `ModuleNotFoundError`"，原因只埋在日志里——
+  在新机器上手动拷贝安装时真实踩到过。
+- 装不上依赖（例如网络不通）时，插件会在仪表盘显示加载失败并带上原因；
+  按官方文档点「尝试一键重载修复」即会先装依赖再加载。
+
+### 内部
+
+- 仓库文档重写为「现状与活知识」（`docs/插件化路线.md`，1970 → 519 行）：删掉已放弃路线的
+  论证过程与阶段 checklist，只留现状、宿主硬事实、踩坑清单与仍然生效的决定
+
+## [0.1.0] - 2026-09-15
 
 首个版本：把原本只有命令行的绘图脚本做成 AstrBot 插件，同时保留 CLI（`python cli.py`）。
 
@@ -42,8 +59,6 @@
 
 - 剿灭、保全等长期任务检测不出来（日常增量会跳过已结束活动的公告页）
 - 公告年份解析错误，导致复刻/长期活动被排到错误的年份
-- **缺依赖时不再"能加载但画不出图"**：`main.py` 导入期就 `import matplotlib`，缺依赖时插件的导入会失败，
-  AstrBot 据此自动执行 `requirements.txt`、装好再重试导入（走你自己配置的 PyPI 镜像与核心依赖约束）。
-  此前是"插件照常加载、第一次出图才报错"，原因只埋在日志里
 
+[0.1.1]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.0

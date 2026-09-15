@@ -9,16 +9,16 @@
 
 设计要点（详见 docs/插件化路线.md）：
 
-* **导入期只碰 matplotlib 一个重依赖**：它在顶层就被 import（缺依赖时宿主据此自动装依赖，§19），
-  而 pyplot 与绘图模块仍留在渲染线程里（§5.5），`initialize()` 立即返回；
-* **一切阻塞都在 `asyncio.to_thread` 里**：渲染是秒级 CPU 占用，取数是同步 httpx（§5.6）；
+* **导入期只碰 matplotlib 一个重依赖**：它在顶层就被 import（缺依赖时宿主据此自动装依赖，§10），
+  而 pyplot 与绘图模块仍留在渲染线程里（§5），`initialize()` 立即返回；
+* **一切阻塞都在 `asyncio.to_thread` 里**：渲染是秒级 CPU 占用，取数是同步 httpx（§5）；
 * **数据与代码分家**：数据写 `data/plugin_data/<插件名>/`（官方 storage 写法），
-  字体/背景图留在插件目录里只读（§5.3）；
+  字体/背景图留在插件目录里只读（§3）；
 * **不留渲染缓存**：每次出图按当天数据现画（一次 matplotlib 几秒），
-  从而不必维护签名、失效与落盘三套状态（§17.4）；
+  从而不必维护签名、失效与落盘三套状态（§5）；
 * **入口层只做四件事**：读配置、说一句进度、出图、发图。判断（数据要不要刷、背景选哪张）
   全在 `渲染服务` 里——入口层多做一份"预判"只会多一条会分叉的路径；
-* 指令与回调的元数据只有一份：`插件/指令.py` 的 `CommandSpec`（§6.3）。
+* 指令与回调的元数据只有一份：`插件/指令.py` 的 `CommandSpec`（§2）。
 """
 
 from __future__ import annotations
@@ -35,14 +35,14 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 PLUGIN_NAME = "astrbot_plugin_ganttknights"
 
-# ==================== 依赖：按生态的约定俗成来（2026-09-15 定，见 docs/插件化路线.md §19）====================
+# ==================== 依赖：按生态的约定俗成来（2026-09-15 定，见 docs/插件化路线.md §10）====================
 #
 # **matplotlib 在导入期就 import**：宿主唯一会替插件装依赖的时刻，就是"插件导入抛
 # `ModuleNotFoundError`"的时候（`core/star/star_manager.py` 的
 # `_import_plugin_with_dependency_recovery`：预检 requirements.txt → pip 装缺的 → 重试导入）。
 # 顶层 import 它 = 缺依赖时导入失败 = 宿主自动装好再重试，用户零操作——和生态里 9/13 的插件同形。
 #
-# ⚠️ `MPLCONFIGDIR` 必须在 matplotlib **首次导入之前**设好（§5.5）：容器/只读环境里默认配置目录
+# ⚠️ `MPLCONFIGDIR` 必须在 matplotlib **首次导入之前**设好（§4 踩坑清单）：容器/只读环境里默认配置目录
 # 不可写，会报错或反复重建字体缓存。
 #
 # 🚫 这两行（环境变量 + import）是**功能性的**，不是装饰：删掉之后一切照常运行，只是"缺依赖"会
@@ -59,7 +59,7 @@ from .插件.指令 import 刷新命令, 帮助命令, 甘特图命令, 状态�
 from .插件.渲染 import 素材缺失, 渲染服务  # noqa: E402
 from .插件.推送 import 推送状态, 推送服务  # noqa: E402
 
-插件版本 = "0.1.0"
+插件版本 = "0.1.1"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""
 
 
@@ -81,12 +81,12 @@ class GanttKnightsPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)  # 注意：config 不走 super()，自己存
         # 只有存在 _conf_schema.json 时 AstrBot 才传 config；取不到就退回全默认值，
-        # 不让一个加载期 TypeError 把插件整个毙掉（§9 版本敏感点）。
+        # 不让一个加载期 TypeError 把插件整个毙掉（§4 踩坑清单）。
         self.config: AstrBotConfig | dict = config if config is not None else {}
         self.plugin_dir = Path(__file__).resolve().parent
 
         # 官方 storage 写法：get_astrbot_data_path() + plugin_data/<插件名>。
-        # 插件名优先用 AstrBot 注入的 self.name，取不到时回落常量（§5.3）。
+        # 插件名优先用 AstrBot 注入的 self.name，取不到时回落常量（§3）。
         插件名 = getattr(self, "name", None) or PLUGIN_NAME
         self.data_dir = Path(get_astrbot_data_path()) / "plugin_data" / 插件名
 
@@ -119,10 +119,10 @@ class GanttKnightsPlugin(Star):
         """插件禁用/重载：关停调度器。
 
         数据（`所有活动数据.csv`、当天日差、推送记账）留在 `data/plugin_data/` 下，
-        跨重启自然复用；渲染产物不在状态里，下次出图重画一遍即可（§17.4）。
+        跨重启自然复用；渲染产物不在状态里，下次出图重画一遍即可（§5）。
 
         ⚠️ 不要给这个类加 `__del__`：`star_manager.py` 是 `if __del__ … elif terminate`，
-        加了之后 `terminate()` 永远不会执行（§16）。
+        加了之后 `terminate()` 永远不会执行（§9）。
         """
         await self.推送.停()
         logger.info("罗德岛甘特图已卸载。")
@@ -161,11 +161,11 @@ class GanttKnightsPlugin(Star):
     async def _发送(self, unified_msg_origin: str, 文本: str, 图片路径: str) -> bool:
         """把一条消息投递到指定会话。
 
-        - 只用 `unified_msg_origin`（裸 session_id 会在宿主的 `split(":", 2)` 处炸，§16）；
+        - 只用 `unified_msg_origin`（裸 session_id 会在宿主的 `split(":", 2)` 处炸，§9）；
         - `send_message()` 返回 `False` 只表示"没找到匹配的平台实例"，非法 umo 直接抛
           `ValueError` → 这里两者都当失败，异常向上抛给推送服务记进状态；
         - 不预检平台能力：`support_proactive_message` 是 4.28 新增且默认 True（信不过），
-          发一次并把结果记下来比读字段可靠（§16）。
+          发一次并把结果记下来比读字段可靠（§9）。
         """
         链 = [组件.Plain(text=文本)] if 文本 else []
         链.append(组件.Image.fromFileSystem(图片路径))
@@ -270,7 +270,7 @@ class GanttKnightsPlugin(Star):
     def _状态文本(self, event: AstrMessageEvent) -> str:
         """`/甘特图状态`：数据新鲜度 / 日差 / 推送武装情况 / 本会话标识。
 
-        刻意不报"缓存条数"之类的东西——渲染不留缓存（§17.4），状态页只回答
+        刻意不报"缓存条数"之类的东西——渲染不留缓存（§5），状态页只回答
         "数据新不新、今天推送会不会来、上次推得怎么样"。
         """
         运行配置 = self.运行配置()
