@@ -4,9 +4,9 @@
 
 1. **默认值必须与 `_conf_schema.json` 一致**。AstrBot 首次加载会把 schema 的默认值
    写进配置文件，之后**存储值永远优先于 schema**——所以改默认值等于"老用户不跟随"，
-   必须写进 CHANGELOG（见 docs/插件化路线.md §4）。
+   必须写进 CHANGELOG（见 docs/插件化.md「踩坑清单」）。
 2. **越界值在读取处夹住**。`minimum` / `maximum` 只是给 WebUI 看的，AstrBot 的原生
-   配置渲染器不读它们，用户手改配置文件、或旧版本残留值都可能越界（§4）。
+   配置渲染器不读它们，用户手改配置文件、或旧版本残留值都可能越界（「踩坑清单」）。
    因此渲染参数一律经 `夹取整数()` 落地。
 
 配置键用英文 snake_case（AstrBot 惯例，也便于 WebUI/HTTP 接口处理），
@@ -14,8 +14,8 @@
 
 **只暴露"用户真的会调"的东西**（2026-09-14 瘦身）：字体不再进配置——自定义字体走两条既有路径
 （插件目录 `字体/`，或 AstrBot 约定 `data/font.ttf` / `font-bold.ttf` / `font-mono.ttf`），
-见 docs/插件化路线.md §5；请求条数与"进行中"宽限小时数也退到内核默认值（GK_* 可覆盖），
-它们只会让用户把图配错。阶段四又拿掉了 `render.reuse_seconds`：既然不留渲染缓存（§5），
+见 docs/插件化.md「接上宿主」；请求条数与"进行中"宽限小时数也退到内核默认值（GK_* 可覆盖），
+它们只会让用户把图配错。阶段四又拿掉了 `render.reuse_seconds`：既然不留渲染缓存（「两次自我推翻」），
 就不存在"多久内复用旧图"这回事——想重画走 `/甘特图刷新`（阶段五）。
 """
 
@@ -28,7 +28,6 @@ from typing import Any
 范围: dict[str, tuple[int, int]] = {
     "left_offset_days": (0, 30),
     "right_offset_days": (7, 30),   # 上限 30：再长时色条被压窄，名字/刻度判定开始贴边（实测见文档）
-    "remind_days": (1, 30),
 }
 
 真值串 = {"1", "true", "yes", "on", "是", "真", "开"}
@@ -41,13 +40,17 @@ from typing import Any
     ("render", "title"): ("标题", "文本非空"),
     ("render", "left_offset_days"): ("左边界天数", "整数"),
     ("render", "right_offset_days"): ("右边界天数", "整数"),
-    ("render", "remind_days"): ("提醒天数", "整数"),
     ("render", "background_file"): ("指定背景", "文本"),
     ("render", "background_dir"): ("背景目录", "文本"),
     ("panels", "voucher"): ("凭证面板", "开关"),
     ("panels", "outfit"): ("时装面板", "开关"),
     ("panels", "module"): ("模组面板", "开关"),
     ("data", "auto_refresh_daily"): ("每日自动更新", "开关"),
+    ("notify", "enabled"): ("通知开关", "开关"),
+    ("notify", "end_enabled"): ("结束提醒开关", "开关"),
+    ("notify", "start_enabled"): ("开始提醒开关", "开关"),
+    ("notify", "end_offsets"): ("结束偏移们", "整数列表"),
+    ("notify", "start_offsets"): ("开始偏移们", "整数列表"),
     ("push", "enabled"): ("推送开关", "开关"),
     ("push", "time"): ("推送时刻", "时刻"),
     ("push", "targets"): ("推送目标", "文本列表"),
@@ -67,7 +70,6 @@ class 运行配置:
     标题: str = "近期活动一览"
     左边界天数: int = 3
     右边界天数: int = 22
-    提醒天数: int = 3
     指定背景: str = ""
     背景目录: str = ""
     # panels
@@ -76,6 +78,12 @@ class 运行配置:
     模组面板: bool = True
     # data
     每日自动更新: bool = True
+    # notify（节点提醒）
+    通知开关: bool = True
+    结束提醒开关: bool = True
+    开始提醒开关: bool = True
+    结束偏移们: tuple[int, ...] = (-3, -1)
+    开始偏移们: tuple[int, ...] = (0,)
     # push
     推送开关: bool = False
     推送时刻: str = "08:00"
@@ -87,6 +95,14 @@ class 运行配置:
                                             strict=True) if 显示)
         return None if len(开着) == len(底栏区名) else 开着
 
+    def 有效结束偏移们(self) -> tuple[int, ...]:
+        """总开关 + 结束侧开关都开着才生效（任一条关掉 → 空元组 = 这类不提醒）。"""
+        return self.结束偏移们 if (self.通知开关 and self.结束提醒开关) else ()
+
+    def 有效开始偏移们(self) -> tuple[int, ...]:
+        """总开关 + 开始侧开关都开着才生效。"""
+        return self.开始偏移们 if (self.通知开关 and self.开始提醒开关) else ()
+
     def 推送时点(self) -> tuple[int, int]:
         """推送时刻 → (时, 分)；初始化时已被 `规范化时刻()` 归一，这里不会失败。"""
         时, 分 = self.推送时刻.split(":")
@@ -97,7 +113,7 @@ class 运行配置:
 """默认推送时刻。
 
 > 为什么是 08:00 而不是 00:0x：明日方舟在北京时间 **04:00** 日切，`今天写过()` 也按自然日判断，
-> 00:00–04:00 之间出图会拿到"还没换日"的数据。提示文案里要写清这一条（§9）。
+> 00:00–04:00 之间出图会拿到"还没换日"的数据。提示文案里要写清这一条（「每日推送」）。
 """
 
 
@@ -168,6 +184,40 @@ def 读取文本列表(值: Any) -> tuple[str, ...]:
     return tuple(出)
 
 
+def 读取整数列表(值: Any) -> tuple[int, ...]:
+    """读一个 `list` 型配置项 → 去重、**由大到小**的整数元组（节点偏移用）。
+
+    容忍：`list`（WebUI 正常形态，元素可能是字符串或数字）、单个字符串（手改配置时常见，
+    按换行/逗号切，全角逗号与全角负号 `−` 都能读）、坏值（丢弃）。
+    夹到 `[-30, 0]`：正偏移没意义（活动结束后已被清理、开始后也不该再报）。
+    排序是有意的：节点文案的分组顺序要稳定，才好测、才好读。
+    """
+    if isinstance(值, (list, tuple)):
+        原始 = list(值)
+    elif isinstance(值, str):
+        文本 = 值.replace("，", ",").replace("\r", "\n")
+        原始 = [x for 段 in 文本.split("\n") for x in 段.split(",")]
+    else:
+        return ()
+
+    出: list[int] = []
+    for x in 原始:
+        if isinstance(x, bool):
+            continue
+        if isinstance(x, (int, float)):
+            数字 = int(x)
+        elif isinstance(x, str):
+            try:
+                数字 = int(x.strip().replace("−", "-").replace("—", "-"))
+            except ValueError:
+                continue
+        else:
+            continue
+        if -30 <= 数字 <= 0 and 数字 not in 出:
+            出.append(数字)
+    return tuple(sorted(出, reverse=True))
+
+
 def 读取开关(值: Any, 默认值: bool) -> bool:
     if isinstance(值, bool):
         return 值
@@ -195,6 +245,7 @@ def 读取配置(config: Any) -> 运行配置:
         "文本非空": lambda 值, 默认值, 键: 读取文本(值, 默认值) or 默认值,
         "时刻": lambda 值, 默认值, 键: 规范化时刻(值),
         "文本列表": lambda 值, 默认值, 键: 读取文本列表(值),
+        "整数列表": lambda 值, 默认值, 键: 读取整数列表(值),
     }
     值们: dict[str, Any] = {}
     节缓存: dict[str, dict[str, Any]] = {}

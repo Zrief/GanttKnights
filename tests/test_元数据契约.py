@@ -1,6 +1,6 @@
 """上架契约：`metadata.yaml` 的字段形状、平台白名单、版本三处一致。
 
-为什么值得测（§6「配置即契约」的同一思路，换个文件）：
+为什么值得测（「测试与验证」「配置即契约」的同一思路，换个文件）：
 - `metadata.yaml` 是**市场记录的唯一来源**——市场 CI 会拿它的 `author`/`name`/`version`
   与发布记录逐字比对（[市场 JSON 规范 2026-06-27](https://docs.astrbot.app/dev/plugin-market/2026-06-27.html) 第 11 节），
   拼错一个 `support_platforms` 取值市场不会报错，只会让卡片上多一个点不亮的平台；
@@ -25,7 +25,7 @@ yaml = pytest.importorskip("yaml", reason="读 metadata.yaml 需要 PyYAML（Ast
 仓库根 = Path(__file__).resolve().parent.parent
 
 # 官方「声明支持平台」文档列出的全部合法取值（2026-09-14 核对 docs.astrbot.app/dev/star/plugin-new.html，
-# 与 4.28 源码 astrbot/core/platform/sources/ 下注册的适配器名一致；旧文档只列 14 个，别照抄）。
+# 与 4.28 源码 astrbot/core/platform/sources/ 下注册的适配器名一致；旧文档只列 14 个，以官方文档为准）。
 平台白名单 = {
     "aiocqhttp", "qq_official", "qq_official_webhook", "telegram", "wecom", "wecom_ai_bot",
     "lark", "dingtalk", "discord", "slack", "kook", "vocechat", "weixin_official_account",
@@ -92,7 +92,7 @@ def test_tags_形状正确(元数据):
 
 
 def test_tags_给游戏名与产物类型各留一个英文入口(元数据):
-    """市场检索按标签字面匹配，同一件事的中英文是两个检索入口（§8）。
+    """市场检索按标签字面匹配，同一件事的中英文是两个检索入口（「装得上、上得了架」）。
 
     只给"游戏名 + 产物类型"配英文；`游戏/图片/推送` 这类通用词不配（配上只是稀释信息量）。
     """

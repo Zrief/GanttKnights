@@ -87,7 +87,8 @@ class 假渲染:
 
     async def 出图(self, **kwargs):
         self.调用 += 1
-        return types.SimpleNamespace(图片路径=self.产物, 警告="警告文本", 变化="", 有警告=True)
+        return types.SimpleNamespace(图片路径=self.产物, 提醒="⚠️ 明天结束\n📅 甲",
+                                     变化="较 09-14：🆕 乙", 有提醒=True)
 
     @staticmethod
     def 产物可用(路径) -> bool:
@@ -97,9 +98,11 @@ class 假渲染:
 def test_目标为空不武装_有目标才武装(tmp_path, 推送, 配置模块):
     渲染 = 假渲染(tmp_path / "图.jpg")
     发送: list[str] = []
+    文本们: list[str] = []
 
     async def 假发送(umo, 文本, 图片路径):
         发送.append(umo)
+        文本们.append(文本)
         return umo != "坏的"          # 让一个目标投递失败，验证"只记成功 → 下次重试"
 
     服务 = 推送.推送服务(渲染=渲染, 状态=推送.推送状态(tmp_path / "s.json"),
@@ -127,6 +130,7 @@ def test_目标为空不武装_有目标才武装(tmp_path, 推送, 配置模块
         服务.确保任务(有坏)
         结果 = await 服务.推一次(运行配置=有坏)
         assert 渲染.调用 == 1 and 发送 == ["甲", "乙", "坏的"]
+        assert 文本们 == ["⚠️ 明天结束\n📅 甲"] * 3     # 文字只来自渲染结果的"提醒"
         assert 服务.状态.该推吗("甲", 今天) is False
         assert 服务.状态.该推吗("坏的", 今天) is True      # 只记成功 → 下次会重试
         await 服务.推一次(运行配置=有坏)

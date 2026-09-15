@@ -37,7 +37,7 @@ from pathlib import Path
 logger = logging.getLogger("ganttknights")
 
 文件名 = "最近数据变化.json"
-最大列名数 = 5
+最大列名数 = 3
 """文案里最多列几个活动名，超出用"等 N 个"（推送文字要短）。"""
 
 
@@ -61,24 +61,28 @@ class 数据变化:
 
         "首次建立"与"没有任何变化"都返回空串：前者不该在群里刷一长串，
         后者本来就无话可说。
+
+        刻意写短（2026-09-15 精简）：`较 09-14：🆕 甲、乙 等 6 个｜✏️ 丙｜🧹 清理 3`
+        —— 日期只留月-日、段间用竖线、最多列 3 个名字。每天一条的推送，
+        长文案只会让人不看。
         """
         if self.首次 or not self.有变化:
             return ""
         段: list[str] = []
 
-        def 列(标题: str, 名们: tuple[str, ...]) -> str:
+        def 列(图标: str, 名们: tuple[str, ...]) -> str:
             头 = "、".join(名们[:最大列名数])
             多 = f" 等 {len(名们)} 个" if len(名们) > 最大列名数 else ""
-            return f"{标题}{头}{多}"
+            return f"{图标} {头}{多}"
 
         if self.新增:
-            段.append(列("🆕 新增 ", self.新增))
+            段.append(列("🆕", self.新增))
         if self.改动:
-            段.append(列("✏️ 时间调整 ", self.改动))
+            段.append(列("✏️", self.改动))
         if self.过期清理:
-            段.append(f"🧹 过期清理 {self.过期清理} 条")
-        前缀 = f"与 {self.对比日期} 相比" if self.对比日期 else "本次更新"
-        return f"{前缀}：" + "；".join(段)
+            段.append(f"🧹 清理 {self.过期清理}")
+        前缀 = f"较 {self.对比日期[5:]}" if self.对比日期 else "本次"
+        return f"{前缀}：" + "｜".join(段)
 
     # ---------- 存取 ----------
 

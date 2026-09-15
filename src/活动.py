@@ -6,7 +6,7 @@
 没有一处用到 groupby / pivot / merge / resample / 时间索引。
 
 而 `import pandas` 在 AstrBot 实例环境（Python 3.12 / pandas 3.0.5）实测要
-**1186 ms**，是插件加载路径上最大的单笔开销（详见 docs/插件化路线.md §5）。
+**1186 ms**，是插件加载路径上最大的单笔开销（详见 docs/插件化.md「起点」）。
 换成这个 dataclass 后，`src.流水线` 的导入从 1319 ms 降到约 200 ms。
 
 字段命名刻意与 CSV 列名对应，便于对照数据文件。

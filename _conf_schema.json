@@ -25,14 +25,6 @@
         "maximum": 30,
         "hint": "图上显示今天之后多少天；实际右边界会对齐到当周周日。上限 30：再长时一条活动的色条会被压得很窄，名字与日期刻度的摆放判定开始贴边（实测 35 天余量已到 0~4px）。"
       },
-      "remind_days": {
-        "description": "过期提醒天数",
-        "type": "int",
-        "default": 3,
-        "minimum": 1,
-        "maximum": 30,
-        "hint": "提醒文案里提前多少天提醒即将结束的活动。"
-      },
       "background_file": {
         "description": "指定背景图文件",
         "type": "string",
@@ -50,7 +42,7 @@
   "panels": {
     "description": "底栏面板",
     "type": "object",
-    "hint": "控制底栏三个上新区是否出现在图里。关掉的区不会画，提醒文案里也不会再提它。",
+    "hint": "控制底栏三个上新区是否画进图里。",
     "items": {
       "voucher": {
         "description": "展示「凭证兑换」面板",
@@ -82,6 +74,43 @@
       }
     }
   },
+  "notify": {
+    "description": "提醒节点",
+    "type": "object",
+    "hint": "只在指定的天数节点提醒——不每天播报清单。总开关关掉、或把某一类的开关关掉/数组清空，就是那一类不提醒。",
+    "items": {
+      "enabled": {
+        "description": "总开关",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后推送只发图，一句提醒都不发。"
+      },
+      "end_enabled": {
+        "description": "提醒「活动即将结束」",
+        "type": "bool",
+        "default": true,
+        "hint": "配合下面的「结束前提醒」天数使用。"
+      },
+      "start_enabled": {
+        "description": "提醒「活动开启」",
+        "type": "bool",
+        "default": true,
+        "hint": "配合下面的「开启前提醒」天数使用。"
+      },
+      "end_offsets": {
+        "description": "结束前提醒（距结束的天数）",
+        "type": "list",
+        "default": [-3, -1],
+        "hint": "命中就提醒：-3 = 结束前 3 天，-1 = 最后一天，0 = 结束当天。可写多个；留空 = 这类不提醒。"
+      },
+      "start_offsets": {
+        "description": "开启前提醒（距开始的天数）",
+        "type": "list",
+        "default": [0],
+        "hint": "0 = 开启当天，-1 = 开启前一天。可写多个；留空 = 这类不提醒。"
+      }
+    }
+  },
   "push": {
     "description": "每日推送",
     "type": "object",
@@ -97,13 +126,13 @@
         "description": "每日推送时刻（HH:MM，24 小时制）",
         "type": "string",
         "default": "08:00",
-        "hint": "按运行 AstrBot 那台机器的本地时间。别设在 00:00~04:00：游戏数据在北京时间 04:00 日切，那段时间出图可能还是前一天的数据。格式不对或越界会退回 08:00。"
+        "hint": "按运行 AstrBot 那台机器的本地时间。格式不对或越界会退回 08:00。"
       },
       "targets": {
         "description": "推送目标会话列表",
         "type": "list",
         "default": [],
-        "hint": "列表为空时，第一个发 /甘特图 的会话会自动被加进来（省去手动填）；之后由你在这里增删——**想停掉某个群的推送，把它从这一项里删掉即可**。会话标识可在目标群发 /甘特图状态 查看。"
+        "hint": "列表为空时，第一个发 /方舟日程 的会话会自动被加进来（省去手动填）；之后由你在这里增删——**想停掉某个群的推送，把它从这一项里删掉即可**。会话标识可在目标群发 /甘特图状态 查看。"
       }
     }
   }

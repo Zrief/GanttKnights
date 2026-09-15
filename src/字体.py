@@ -15,11 +15,11 @@
 2. `settings.额外字体`：插件传入 AstrBot 文档化的自定义字体插槽
    （`data/font.ttf` / `font-bold.ttf` / `font-mono.ttf`，见 `core/config/default.py` 的 t2i 提示）；
    另有单文件开关 `settings.font_path` + `settings.font_family`；
-3. **平台自带 CJK 家族**（`无衬线候选` / `等宽候选`，抄自 AstrBot 本地文转图策略
+3. **平台自带 CJK 家族**（`无衬线候选` / `等宽候选`，沿用 AstrBot 的本地文转图策略
    `astrbot/core/utils/t2i/local_strategy.py:34-111`）：Windows 微软雅黑、macOS 苹方 / Hiragino、
    Linux 与官方 Docker 镜像的 Noto CJK。
 
-不使用衬线（2026-09 决定，理由见 docs §5）：衬线只用在页眉标题与底栏分区标签两处，
+不使用衬线（2026-09 决定，理由见 docs「接上宿主」）：衬线只用在页眉标题与底栏分区标签两处，
 而所有候选字体的汉字 advance 都是 1.000em，换族对版面零影响，少依赖一支 25MB 的字体文件。
 
 `真粗体` 的判定
