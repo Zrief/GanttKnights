@@ -17,13 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-# 类型编码：与 CSV 的「类型」列一致（见 main/流水线 的类型关键词表）
-类型_卡池 = 0
-类型_活动 = 1
-类型_福利 = 2
-类型_商店 = -1
-类型_长期 = 99
-
 
 @dataclass(frozen=True, slots=True)
 class 活动:

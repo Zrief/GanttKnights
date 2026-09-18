@@ -25,7 +25,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -143,26 +142,20 @@ def 区弧度表() -> dict[str, float]:
 
 
 # ============================ 文本宽度 ============================
-# 两种度量方式，用 GK_文本度量 切换：
-#
-#   真实（默认）：交给 matplotlib 自己量（`TextToPath`，与渲染器同一条 set_text 路径、
-#     含 fallback 列表），按 (串, 字号, family, weight) 缓存。一次渲染只有几十次调用
-#     （活动名 + 日期刻度 + 底栏截断），实测冷缓存 +19ms、热缓存 ~0，代价可忽略。
-#   估算（GK_文本度量=估算 可退回）：汉字/全角记 1em、其余记 0.55em。
-#     快，但**与真实字形有系统性偏差**，且偏差方向随字体翻转（对随包 Noto Sans CJK 的
-#     "2026-07-01" 偏宽 5.8%；换微软雅黑则数字偏窄 1.5%、混合串偏宽 11.3%），
-#     对等宽日期标签低估 14.9%。窗口 ≤30 天时这个偏差看不出来（判定余量 ≥60px），
-#     但窗口拉长/换字体后会让"名字放不放得进条内"这类卡边判定出错（实测 60 天时 1 处）。
+# 交给 matplotlib 自己量（`TextToPath`，与渲染器同一条 set_text 路径、含 fallback
+# 列表），按 (串, 字号, family, weight) 缓存。一次渲染只有几十次调用（活动名 +
+# 日期刻度 + 底栏截断），实测冷缓存 +19ms、热缓存 ~0，代价可忽略。
+# （旧版曾有"汉字 1em / 西文 0.55em"的估算法，与真实字形有系统性偏差且方向随字体
+#   翻转，换字体后会让"名字放不放得进条内"这类卡边判定出错，已删。）
 #
 # ⚠️ **不要**改成 `FT2Font.load_char()` 逐字取 advance：字体里缺该字形时（例如没装中文字体、
 #    只剩 DejaVu），本机实测**直接段错误 0xC0000005 把宿主进程打死**——AstrBot 会跟着挂。
 #    `get_text_width_height_descent()` 遇到缺字形只 warning，是安全的。
-字体度量方式 = os.environ.get("GK_文本度量", "真实").strip() or "真实"
 
 
 @lru_cache(maxsize=1)
 def _度量器() -> TextToPath:
-    """TextToPath 构造要建 MathTextParser，按需创建（估算模式下一次都不建）"""
+    """TextToPath 构造要建 MathTextParser，按需创建"""
     return TextToPath()
 
 
@@ -175,13 +168,7 @@ def _真实宽度(s: str, 字号: float, family: str | None, weight: str | None)
 
 def 文本宽(s: str, 字号: float, family: str | None = None,
            weight: str | None = None) -> float:
-    """文本宽度（px）。family/weight 只影响"真实"度量；估算式不看字体。
-
-    调用方应传入**实际绘制时用的** family/weight，否则真实度量会量错字体。
-    """
-    if 字体度量方式 != "真实":
-        em = 字号 / 72 * DPI
-        return sum(em * (1.0 if ord(ch) > 0x2E80 else 0.55) for ch in s)
+    """文本宽度（px）。调用方应传入**实际绘制时用的** family/weight，否则会量错字体。"""
     return _真实宽度(s, 字号, family, weight)
 
 

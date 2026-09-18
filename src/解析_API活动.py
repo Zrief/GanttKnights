@@ -1,7 +1,12 @@
 """解析层 — 把 SMW ask 的查询结果转成活动条目
 
-只负责"看懂 API 返回"：类型归类、时间戳转换、逐个活动调公告页拆子活动。
-合并与存储见 汇总_活动.py。
+**公告是唯一时间源，ask 只当电话簿**（2026-09-17 定；页面名/类型/粗窗口/分组）：
+wiki 手填的 SMW 属性会抄错（实测 `稳态测定` 的窗口被抄成月行水上那批的），
+而公告原文是运营公告的逐字转载。ask 时间只剩三个用途：30 天扫描过滤、
+公告年份锚、无公告页条目（99 型常驻）的兜底。
+
+认领顺序即降级顺序（`认领与生成`）：`公告=` 的 #板块锚点（wiki 的显式指认）→
+板块标题含活动名 → ask 粗窗口。无人认领的板块（关卡◆/组合包/剿灭追加）照常自生成。
 """
 
 from __future__ import annotations
@@ -9,8 +14,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from .获取_prts import 获取公告wikitext
-from .解析_公告 import 解析分区
+from .获取_prts import 公告页标题, 获取页面wikitext
+from .解析_公告 import 板块, 板块条目, 公告定位, 关卡条目, 页父名, 解析活动信息, 提醒保全, 抽板块
 
 logger = logging.getLogger("src.解析")
 
@@ -98,22 +103,67 @@ def 提取官网链接(属性: dict) -> str:
     return str(v.get("raw", "")).strip() if isinstance(v, dict) else str(v).strip()
 
 
-def API转活动列表(api原始: list[dict], 现在时间: str, 回溯已结束: bool = False) -> list[dict]:
-    """SMW ask 结果 → 活动条目列表
+def 认领与生成(成员们: list[dict], 页们: dict[str, list[板块]]) -> list[dict]:
+    """组内的三层认领与条目生成（**纯函数**：网络与页面定位由调用方负责，测试直接喂字典）。
 
-    开始/结束时间的 SMW 属性存的是 UTC，一律 +8h 换算成国服时间
-    （开始时间优先用 活动开始时间cn，内容一致）。
+    成员字段：事件名 / 显示名 / 开始 / 结束 / 类型 / 已结束 / 公告页 / 锚点。
+    每个成员至多认领一个板块，每个板块至多被一个成员认领。
+    """
+    全板块 = [(页名, b) for 页名, 表 in 页们.items() for b in 表]
+    认领: dict[int, dict] = {}       # 板块序号 → 成员
+    已领: set[int] = set()           # 已认领成员的 id()
+
+    def 试认领(m: dict, i: int, b: 板块, 方式: str) -> bool:
+        if i not in 认领 and b.窗口:
+            认领[i] = m
+            已领.add(id(m))
+            logger.info("  %s ← 板块「%s」（%s认领）", m["显示名"], b.标题, 方式)
+            return True
+        return False
+
+    for m in 成员们:                                 # ① 锚点：wiki 的显式指认（只在该成员指的页里找）
+        if m["锚点"]:
+            for i, (页名, b) in enumerate(全板块):
+                if 页名 == m["公告页"] and b.标题 == m["锚点"] and 试认领(m, i, b, "锚点"):
+                    break
+    for m in 成员们:                                 # ② 板块标题含事件名
+        if id(m) not in 已领:
+            for i, (_, b) in enumerate(全板块):
+                if m["事件名"] in b.标题 and 试认领(m, i, b, "标题"):
+                    break
+
+    结果 = []
+    for i, (页名, b) in enumerate(全板块):
+        父名 = 页父名(页名)
+        m = 认领.get(i)
+        if m is None:
+            结果.extend(板块条目(b, 父名))            # 无人认领：按既有命名规则自生成
+            continue
+        结果.append({"名称": m["显示名"], "开始时间": b.窗口[0], "结束时间": b.窗口[1],
+                    "类型": m["类型"], "_parent": 父名})
+        if 关卡 := 关卡条目(b, 父名):                 # 被认领的主体板块，其 ◆ 段照常出一条 关卡
+            结果.append(关卡)
+
+    for m in 成员们:                                 # ③ 未认领 → ask 粗窗口
+        if id(m) in 已领:
+            continue
+        if m["已结束"]:
+            logger.info("  %s → 未认领（已结束，不添加）", m["显示名"])
+        else:
+            结果.append({"名称": m["显示名"], "开始时间": m["开始"], "结束时间": m["结束"],
+                        "类型": m["类型"], "_parent": ""})
+            logger.info("  %s → ask 时间（类型 %s，公告未认领）", m["显示名"], m["类型"])
+    return 结果
+
+
+def API转活动列表(api原始: list[dict], 现在时间: str, 回溯已结束: bool = False) -> list[dict]:
+    """SMW ask 结果 → 活动条目列表（机制见模块 docstring）
 
     - `回溯已结束=False`（日常）：只看**进行中 + 近期窗口内结束过**的活动；
     - `回溯已结束=True`（初始化：CLI `--bootstrap` / `/甘特图初始化`）：看**所有**活动。
 
-    对看得到的事件，**每次都读一遍它的公告页**（不查"解析过没有"、不记台账）：
-    公告页会被**追加**内容——新的剿灭轮换就写在当期活动的公告里，
-    按"解析过就跳过"会让追加部分永远看不到（2026-09-14 实测：库里那条剿灭只有
-    全量重建那次才捡到）。读不到公告就用 ask 时间兜底。
-
-    同一官网公告的活动（官网链接相同）只读一份公告——公告页挂在主活动名下，
-    登录活动等次要成员没有自己的公告页。
+    公告页会被**追加**内容（新的剿灭轮换写在当期活动的公告里），所以看得到的组
+    每次都重读公告——公告也是我们唯一的显示时间来源。
 
     新增与过期不在这里判断：交给下游 `合并保存CSV`（它拿这个列表和昨天的 CSV 合并，
     有新增就加、过期就删）。
@@ -121,7 +171,7 @@ def API转活动列表(api原始: list[dict], 现在时间: str, 回溯已结束
     现在dt = datetime.strptime(现在时间, "%Y-%m-%d %H:%M:%S")
     窗口线 = (现在dt - timedelta(days=近期窗口天)).strftime("%Y-%m-%d %H:%M:%S")
 
-    # 整理有效条目：进行中的 + 窗口内结束过的（更老的活动不读公告，靠初始化补齐）
+    # 整理成员：ask 只提供身份（名称/类型/分组）与粗窗口（过滤 + 年份锚）
     待处理: list[dict] = []
     for 事件名, 条目 in api原始:
         属性 = 条目.get("printouts", {})
@@ -153,60 +203,39 @@ def API转活动列表(api原始: list[dict], 现在时间: str, 回溯已结束
             "参考": 开始dt + (结束dt - 开始dt) / 2,
         })
 
-    # 按官网公告分组；组内登录活动等次要成员排后面（公告页挂在主活动名下）
+    # 逐成员读活动页本体的 {{活动信息}}，拿 公告= 指认（99 型常驻没有公告页，跳过）
+    for m in 待处理:
+        m["公告页"] = m["锚点"] = None
+        if m["类型"] != 99:
+            信息 = 解析活动信息(获取页面wikitext(m["事件名"]) or "")
+            if 信息.get("公告"):
+                m["公告页"], m["锚点"] = 公告定位(信息["公告"])
+
     分组: dict[str, list[dict]] = {}
     for t in 待处理:
         分组.setdefault(t["组"], []).append(t)
 
+    公告缓存: dict[tuple[str, datetime], list[板块]] = {}
+
+    def 取公告(页名: str, 参考: datetime) -> list[板块]:
+        """读一份公告页 → 板块表；读不到 → 空表。缓存键带**参考窗**：
+        同一份公告可能被复刻页指回，年份锚不同则解析结果不同，不能共用。"""
+        键 = (页名, 参考)
+        if 键 not in 公告缓存:
+            wikitext = 获取页面wikitext(页名)
+            公告缓存[键] = 抽板块(wikitext, 参考) if wikitext else []
+        return 公告缓存[键]
+
     活动列表: list[dict] = []
-
-    def 收录(m: dict) -> bool:
-        """用 m 的公告页收录子活动；成功（读到页面且解析出内容）返回 True。
-
-        已结束成员的公告只收**仍在进行**的内容（剿灭/保全轮换等）；
-        公告里的签到板块往往不带本名（如月行水上公告的签到其实是此夜同行），
-        窗口与同组成员一致的交给该成员的 ask 条目，丢弃无名副本。
-        """
-        公告 = 获取公告wikitext(m["事件名"])
-        if 公告 is None:
-            return False
-        子活动 = 解析分区(公告, m["显示名"], m["参考"])
-        if m["已结束"]:
-            子活动 = [e for e in 子活动 if e["结束时间"] > 现在时间]
-        同组窗口 = {(x["开始"], x["结束"]) for x in m["_同组"] if x["显示名"] != m["显示名"]}
-        子活动 = [e for e in 子活动
-                 if e["类型"] != 2 or (e["开始时间"], e["结束时间"]) not in 同组窗口]
-        if 子活动:
-            活动列表.extend(子活动)
-            logger.info("  %s → %d 条子活动", m["显示名"], len(子活动))
-            return True
-        if not m["已结束"]:
-            # 公告明明存在却解析不出内容，多半是解析规则跟不上页面改版——需要人工介入
-            logger.warning(
-                "  %s 公告存在但未解析出子活动，已回退 API 时间；若多日持续请检查 src/解析_公告.py 的规则",
-                m["显示名"],
-            )
-        return False
-
-    def 兜底(m: dict) -> None:
-        """没收录到子活动时：进行中的成员退回 ask 时间，已结束的什么都不加
-        （它的公告里没有仍在进行的内容）。"""
-        if m["已结束"]:
-            logger.info("  %s（已结束）公告无可收录内容", m["显示名"])
-            return
-        活动列表.append({"名称": m["显示名"], "开始时间": m["开始"],
-                        "结束时间": m["结束"], "类型": m["类型"], "_parent": ""})
-        logger.info("  %s → API 时间（%s）", m["显示名"], m["类型"])
-
     for 成员们 in 分组.values():
-        成员们.sort(key=lambda m: (m["类型"] == 2, m["已结束"]))
-        for m in 成员们:
-            m["_同组"] = 成员们
-        已读到 = False
-        for m in 成员们:
-            if not 已读到 and 收录(m):
-                已读到 = True       # 本组这次已读到内容，其余成员走兜底
-                continue
-            兜底(m)
+        成员们.sort(key=lambda m: (m["类型"] == 2, m["已结束"]))   # 主活动先认领
+        # 组的公告页：成员 公告= 指的页；没人写过才退回主成员的默认公告页
+        候选们 = [m["公告页"] for m in 成员们 if m["公告页"]]
+        if not 候选们 and 成员们[0]["类型"] != 99:
+            候选们 = [公告页标题(成员们[0]["事件名"])]
+        页们 = {页: 表 for 页 in dict.fromkeys(候选们)
+               if (表 := 取公告(页, 成员们[0]["参考"]))}
+        活动列表.extend(认领与生成(成员们, 页们))
 
+    提醒保全(活动列表)
     return 活动列表

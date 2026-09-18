@@ -59,7 +59,7 @@ from .插件.指令 import 刷新命令, 帮助命令, 甘特图命令, 状态�
 from .插件.渲染 import 素材缺失, 渲染服务  # noqa: E402
 from .插件.推送 import 推送状态, 推送服务  # noqa: E402
 
-插件版本 = "0.1.2"
+插件版本 = "0.1.3"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""
 
 
@@ -106,9 +106,8 @@ class GanttKnightsPlugin(Star):
     # ==================== 生命周期 ====================
 
     async def initialize(self) -> None:
-        """只建目录、清一次旧版本残留、读一次配置、武装定时任务——爬取与渲染都推迟到真正出图时。"""
+        """只建目录、读一次配置、武装定时任务——爬取与渲染都推迟到真正出图时。"""
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.渲染.清理旧缓存()      # 阶段四的 渲染缓存/ 已废弃，顺手删掉
         logger.info(
             "明日方舟甘特图已加载：插件目录 %s｜数据目录 %s｜matplotlib 缓存 %s",
             self.plugin_dir, self.data_dir, self.mplconfig_dir,

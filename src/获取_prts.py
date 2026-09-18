@@ -73,14 +73,14 @@ def 获取事件列表(limit: int = 50) -> list[dict]:
     return []
 
 
-def 获取公告wikitext(事件名: str) -> str | None:
-    """获取活动公告页的 wikitext 源码，页面不存在或为空则返回 None"""
+def 获取页面wikitext(页名: str) -> str | None:
+    """获取任意页面的 wikitext 源码（公告页 / 活动页本体通用），不存在或为空则返回 None"""
     try:
         resp = 请求(
             PRTS_API,
             params={
                 "action": "parse",
-                "page": 公告页标题(事件名),
+                "page": 页名,
                 "prop": "wikitext",
                 "format": "json",
             },
@@ -100,7 +100,7 @@ def 获取公告wikitext(事件名: str) -> str | None:
 
 
 def 公告页标题(事件名: str) -> str:
-    """活动公告页的页面名（`获取公告wikitext()` 与修订探测共用同一份拼接规则）"""
+    """默认公告页的页面名（`解析_API活动` 在成员没写 `公告=` 时的回退路径用）"""
     return f"{事件名}/活动公告"
 
 

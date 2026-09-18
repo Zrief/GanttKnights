@@ -1,9 +1,16 @@
-"""解析层 — 把公告页 wikitext 拆成多条活动"""
+"""解析层 — 公告页 / 活动页的 wikitext 解析
+
+- `抽板块` / `板块条目` / `关卡条目`：公告 → 板块表与条目。纯解析，认领策略见 解析_API活动。
+- `解析活动信息` / `公告定位` / `页父名`：活动页 `{{活动信息}}` 的 `公告=` 指认——
+  wiki 在这里维护着"这条活动的内容在哪个公告页的哪个板块"，可带 #板块锚点
+  （如 此夜同行 → 月行水上/活动公告#【…】签到活动开启）。
+"""
 
 from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 
 logger = logging.getLogger("src.解析")
@@ -135,7 +142,7 @@ def _长期任务名(标题: str) -> str:
 
 # 保全轮换不在任何公开来源（活动公告/SMW/保全派驻页均无日期），列为待办项：
 # 解析链路保持就位，将来官方一旦公告，这里会以 warning 提醒
-def _提醒保全(条目们: list[dict]) -> None:
+def 提醒保全(条目们: list[dict]) -> None:
     for e in 条目们:
         if e["名称"].startswith("【保全】"):
             logger.warning(
@@ -144,7 +151,44 @@ def _提醒保全(条目们: list[dict]) -> None:
             )
 
 
-# ---------- 页面解析 ----------
+# ---------- 活动页本体：{{活动信息}} 模板 ----------
+
+def 解析活动信息(wikitext: str) -> dict[str, str]:
+    """活动页 wikitext → `{{活动信息}}` 模板的字段表（要的是 `公告=` 指认）。无模板 → {}"""
+    m = re.search(r"\{\{活动信息(.*?)\}\}", wikitext, re.S)
+    if not m:
+        return {}
+    return {
+        km.group(1).strip(): km.group(2).strip()
+        for 行 in m.group(1).splitlines()
+        if (km := re.match(r"\|\s*([^=|]+?)\s*=\s*(.*)", 行))
+    }
+
+
+def 公告定位(公告值: str) -> tuple[str, str]:
+    """`公告=` 的值 → (公告页名, 板块锚点)。带锚点时 wiki 已指认到具体板块，
+    这是"板块名与活动名无关"时（此夜同行）唯一的可靠映射。"""
+    页名, _, 锚点 = 公告值.partition("#")
+    return 页名.strip(), 锚点.strip()
+
+
+def 页父名(页名: str) -> str:
+    """公告页名 → 所属活动名（`X/活动公告` → `X`；其他写法原样返回）"""
+    return 页名[: -len("/活动公告")] if 页名.endswith("/活动公告") else 页名
+
+
+# ---------- 公告解析：板块表 ----------
+
+@dataclass
+class 板块:
+    """公告里的一个分区。命名与认领策略不在这一层（见 解析_API活动）。"""
+
+    标题: str
+    窗口: tuple[str, str] | None          # `活动时间：` 的起止；只有 ◆ 关卡段的板块没有它
+    关卡各段: list[tuple[str, str]]
+    类型: int
+    是主体: bool                          # 主活动板块（SideStory/活动关卡）：◆ 段要另出一条 关卡
+
 
 def _清理行(行: str) -> str:
     """剥掉加粗/斜体和 HTML 标签；模板含日期时剥语法留内容，否则整块删除"""
@@ -160,10 +204,11 @@ def _清理行(行: str) -> str:
     return re.sub(r"\{\{[^{}]*\}\}", _处理模板, 行).strip()
 
 
-def 解析分区(wikitext: str, 父名: str, 参考: datetime | None = None) -> list[dict]:
-    """把活动公告页 wikitext 按 ==分区== 解析为一条条活动
+def 抽板块(wikitext: str, 参考: datetime | None = None) -> list[板块]:
+    """公告 wikitext → 板块列表。
 
-    `参考` = 父活动的时间窗（ask 给的），用于给"只有 X月X日"的公告**定年份**（见 `解析时间`）。
+    跳过 寻访/时装 等板块（条目另有来源，见 跳过关键词）。
+    `参考` = 父活动时间窗，用于给"只写 X月X日"的日期定年份（见 `解析时间`）。
     """
     匹配们 = list(标题正则.finditer(wikitext))
     if not 匹配们:
@@ -180,17 +225,13 @@ def 解析分区(wikitext: str, 父名: str, 参考: datetime | None = None) -> 
 
         # 收集分区正文里的非空文本行
         正文终点 = 匹配们[i + 1].start() if i + 1 < len(匹配们) else len(wikitext)
-        段落 = []
+        活动时间 = None
+        关卡各段: list[tuple[str, str]] = []
+
         for 行 in wikitext[m.end():正文终点].splitlines():
             t = _清理行(行)
-            if t:
-                段落.append(t)
-
-        # 分离活动时间和关卡子时间
-        活动时间 = None
-        关卡各段 = []
-
-        for t in 段落:
+            if not t:
+                continue
             pt = 解析时间(t, 参考)
             if not pt:
                 continue
@@ -204,56 +245,67 @@ def 解析分区(wikitext: str, 父名: str, 参考: datetime | None = None) -> 
         if not 活动时间 and not 关卡各段:
             continue
 
-        是主体 = "活动关卡" in 标题 or "SideStory" in 标题
-        是独立的 = _是独立活动(标题, 父名)
-        分段类型 = 分类章节(标题)
+        结果.append(板块(
+            标题=标题,
+            窗口=活动时间,
+            关卡各段=关卡各段,
+            类型=分类章节(标题),
+            是主体=("活动关卡" in 标题 or "SideStory" in 标题),
+        ))
+    return 结果
 
-        # --- 独立活动 ---
-        if 是独立的:
-            if 活动时间:
-                名称 = _长期任务名(标题) if 分段类型 == 99 else _独立活动名(标题)
-                结果.append({
-                    "名称": 名称,
-                    "开始时间": 活动时间[0],
-                    "结束时间": 活动时间[1],
-                    "类型": 分段类型,
-                    "_parent": 父名,
-                })
-            continue
 
-        # --- 主体活动时间 ---
-        if 活动时间:
-            if 是主体:
-                名称 = 父名
-            elif 分段类型 == 2:
-                名称 = f"{父名} 签到"
-            elif 分段类型 == -1:
-                名称 = f"{父名} 组合包"
-            else:
-                名称 = f"{父名} {标题}"
-                for suffix in ("限时开放", "限时售卖", "限时上架", "限时开启"):
-                    if 名称.endswith(suffix):
-                        名称 = 名称[:-len(suffix)]
-                        break
+def 关卡条目(b: 板块, 父名: str) -> dict | None:
+    """主体板块的 ◆ 关卡段 → 一条 `父名 关卡` 条目（跨段取最早开始/最晚结束）"""
+    if not (b.关卡各段 and b.是主体):
+        return None
+    return {
+        "名称": f"{父名} 关卡",
+        "开始时间": min(段[0] for 段 in b.关卡各段),
+        "结束时间": max(段[1] for 段 in b.关卡各段),
+        "类型": 1,
+        "_parent": 父名,
+    }
 
+
+def 板块条目(b: 板块, 父名: str) -> list[dict]:
+    """无人认领的板块自生成的条目（沿用既有命名规则）。"""
+    结果 = []
+
+    if _是独立活动(b.标题, 父名):
+        if b.窗口:
+            名称 = _长期任务名(b.标题) if b.类型 == 99 else _独立活动名(b.标题)
             结果.append({
                 "名称": 名称,
-                "开始时间": 活动时间[0],
-                "结束时间": 活动时间[1],
-                "类型": 分段类型,
+                "开始时间": b.窗口[0],
+                "结束时间": b.窗口[1],
+                "类型": b.类型,
                 "_parent": 父名,
             })
+        return 结果
 
-        # --- 关卡时间 ---
-        if 关卡各段 and 是主体:
-            最早开始 = min(关卡各段, key=lambda x: x[0])
-            最晚结束 = max(关卡各段, key=lambda x: x[1])
-            结果.append({
-                "名称": f"{父名} 关卡",
-                "开始时间": 最早开始[0],
-                "结束时间": 最晚结束[1],
-                "类型": 1,
-                "_parent": 父名,
-            })
-    _提醒保全(结果)
+    if b.窗口:
+        if b.是主体:
+            名称 = 父名
+        elif b.类型 == 2:
+            名称 = f"{父名} 签到"
+        elif b.类型 == -1:
+            名称 = f"{父名} 组合包"
+        else:
+            名称 = f"{父名} {b.标题}"
+            for suffix in ("限时开放", "限时售卖", "限时上架", "限时开启"):
+                if 名称.endswith(suffix):
+                    名称 = 名称[:-len(suffix)]
+                    break
+
+        结果.append({
+            "名称": 名称,
+            "开始时间": b.窗口[0],
+            "结束时间": b.窗口[1],
+            "类型": b.类型,
+            "_parent": 父名,
+        })
+
+    if 关卡 := 关卡条目(b, 父名):
+        结果.append(关卡)
     return 结果

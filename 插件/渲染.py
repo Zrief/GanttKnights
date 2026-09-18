@@ -26,7 +26,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
 import zlib
 from dataclasses import fields, replace
 from datetime import datetime
@@ -112,19 +111,6 @@ class 渲染服务:
             except OSError:
                 logger.warning("删不掉（继续，初始化会覆盖它）：%s", 路径, exc_info=True)
         logger.info("已清空活动数据，准备初始化重建：%s", csv路径)
-
-    def 清理旧缓存(self) -> None:
-        """删掉阶段四留下的 `渲染缓存/`（升级路径用；渲染缓存已经整个废弃，「两次自我推翻」）。
-
-        只删这一个目录名，不动同级的 `图片缓存/`（头像）与 `最近数据变化.json`。
-        """
-        目录 = self.数据目录 / "渲染缓存"
-        if 目录.is_dir():
-            try:
-                shutil.rmtree(目录)
-                logger.info("已清理阶段四遗留的渲染缓存目录：%s", 目录)
-            except OSError:
-                logger.warning("渲染缓存目录删不掉（忽略）：%s", 目录, exc_info=True)
 
     def 内核设置(self, 运行配置: 运行配置) -> Settings:
         """插件侧路径 + 数值配置 → 内核 Settings。
