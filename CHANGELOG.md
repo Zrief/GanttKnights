@@ -5,7 +5,7 @@
 > AstrBot WebUI 插件页的「更新日志」按钮读的就是本文件（`dashboard/services/plugin_service.py`
 > 会在插件目录里找 `CHANGELOG.md`），所以**每个版本都要在这里留一段**。
 
-## [未发布]
+## [0.1.4] - 2026-09-23
 
 ### 新增
 
@@ -151,6 +151,7 @@
 - 剿灭、保全等长期任务检测不出来（日常增量会跳过已结束活动的公告页）
 - 公告年份解析错误，导致复刻/长期活动被排到错误的年份
 
+[0.1.4]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.1
