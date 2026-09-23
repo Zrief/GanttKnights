@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -36,6 +36,13 @@ ENV_输出路径 = "GK_OUTPUT_PATH"
 ENV_背景目录 = "GK_BG_DIR"
 ENV_API条数 = "GK_API_LIMIT"
 ENV_宽限小时 = "GK_FUTURE_BUFFER_HOURS"
+
+# 下面这组只对应"某一个文件/目录"（上面那组是基准目录，其余路径由它们推导）：
+ENV_数据CSV = "GK_DATA_CSV"
+ENV_新增预告 = "GK_NEW_ITEMS"
+ENV_图标缓存 = "GK_ICON_CACHE"
+ENV_警告文件 = "GK_WARNING"
+ENV_额外字体目录 = "GK_EXTRA_FONT_DIR"
 
 
 def _env路径(名: str) -> Path | None:
@@ -113,10 +120,10 @@ class Settings:
         self.字体目录 = 字体目录
 
         env = {
-            "all_data_path": _env路径("GK_DATA_CSV"),
-            "new_items_path": _env路径("GK_NEW_ITEMS"),
-            "icon_cache_dir": _env路径("GK_ICON_CACHE"),
-            "warning_path": _env路径("GK_WARNING"),
+            "all_data_path": _env路径(ENV_数据CSV),
+            "new_items_path": _env路径(ENV_新增预告),
+            "icon_cache_dir": _env路径(ENV_图标缓存),
+            "warning_path": _env路径(ENV_警告文件),
             "output_path": _env路径(ENV_输出路径),
             "bg_dir": _env路径(ENV_背景目录),
         }
@@ -130,16 +137,18 @@ class Settings:
                                   or (数据目录 / "图片缓存"))
         self.warning_path = str(self.warning_path or env["warning_path"]
                                 or (数据目录 / "警告.txt"))
-        # output_path 特例：渲染产物是"给人看的展示图"，历来与代码同级（README 引用它），
-        # 因此默认挂在 素材目录 而非 数据目录；要改位置用 GK_OUTPUT_PATH。
+        # output_path 默认落**数据目录**（可写、可丢、不进 git）。它曾经默认与代码同级
+        # （仓库根的 Gantt.jpg，被 README 当展示图引用），但那样每跑一次 CLI 就把一个
+        # 被 git 追踪的文件改脏；仓库根那份现在只是展示图快照，要更新得手动覆盖。
+        # 要换位置用 GK_OUTPUT_PATH。
         self.output_path = str(self.output_path or env["output_path"]
-                               or (素材目录 / "Gantt.jpg"))
+                               or (数据目录 / "Gantt.jpg"))
         self.bg_dir = str(self.bg_dir or env["bg_dir"] or (素材目录 / "背景图"))
         self.font_path = self.font_path or str(字体目录 / "NotoSansCJKsc-Regular.otf")
 
         # 额外字体（角色 → 文件）：显式传入优先，其次 GK_EXTRA_FONT_DIR 目录下的三个约定名
         if self.额外字体 is None:
-            额外目录 = _env路径("GK_EXTRA_FONT_DIR")
+            额外目录 = _env路径(ENV_额外字体目录)
             约定 = (("正文", "font.ttf"), ("粗体", "font-bold.ttf"), ("等宽", "font-mono.ttf"))
             if 额外目录:
                 self.额外字体 = {角色: str(额外目录 / 名) for 角色, 名 in 约定

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -24,13 +25,15 @@ from src.流水线 import (
     今天写过,
     更新增预告,
     更新数据,
+    背景图缺失,
+    渲染结果,
     render_once,
 )
 
 logger = logging.getLogger("ganttknights")
 
 
-def main(force: bool = False, bootstrap: bool = False, 现在时间: datetime | None = None) -> None:
+def main(force: bool = False, bootstrap: bool = False, 现在时间: datetime | None = None) -> 渲染结果:
     """CLI 编排：先按"每天只做一次"决定是否更新数据与新增预告，再渲染。
 
     时间在每次调用时求值：CLI 下与模块导入时刻等价，
@@ -83,4 +86,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     setup_logging()
-    main(force=args.force, bootstrap=args.bootstrap)
+    try:
+        main(force=args.force, bootstrap=args.bootstrap)
+    except 背景图缺失 as exc:
+        # 内核只抛普通异常（SystemExit 会穿透插件的 to_thread 杀掉任务链），
+        # "退出码"这件事归入口层管：这里翻译成一句话 + 退出码 1。
+        logger.error("%s", exc)
+        sys.exit(1)

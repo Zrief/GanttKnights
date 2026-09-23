@@ -188,14 +188,22 @@ def 今天写过(路径: Path, 现在时间: datetime) -> bool:
 
 # ============================ 渲染 ============================
 
+class 背景图缺失(RuntimeError):
+    """渲染必需的背景图缺失：`bg_dir` 为空，且没有显式指定用哪张。
+
+    内核抛**普通异常**而不是 `SystemExit`：后者不是 `Exception` 子类，
+    会穿透 `asyncio.to_thread` 杀掉宿主（插件）的任务链，入口层的 `except Exception` 也拦不住。
+    退出码由 CLI 入口翻译（见 `cli.py` 的 `__main__`）。
+    """
+
+
 def 挑选背景图(背景路径: str | Path | None = None) -> str:
-    """未指定背景时从 bg_dir 随机取一张；目录为空则抛 SystemExit（与改造前一致）"""
+    """未指定背景时从 bg_dir 随机取一张；目录为空则抛 `背景图缺失`"""
     if 背景路径:
         return str(背景路径)
     背景列表 = list(Path(settings.bg_dir).glob("*"))
     if not 背景列表:
-        logger.error("背景图目录为空: %s", settings.bg_dir)
-        raise SystemExit(1)
+        raise 背景图缺失(f"背景图目录为空: {settings.bg_dir}")
     return str(choice(背景列表))
 
 
