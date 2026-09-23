@@ -51,9 +51,11 @@ from typing import Any
     ("notify", "start_enabled"): ("开始提醒开关", "开关"),
     ("notify", "end_offsets"): ("结束偏移们", "整数列表"),
     ("notify", "start_offsets"): ("开始偏移们", "整数列表"),
+    ("notify", "require_reminder"): ("只在有提醒时推送", "开关"),
     ("push", "enabled"): ("推送开关", "开关"),
     ("push", "time"): ("推送时刻", "时刻"),
     ("push", "targets"): ("推送目标", "文本列表"),
+    ("push", "text_template"): ("推送文案模板", "文本"),
 }
 """`(节, schema 键) → (运行配置 字段名, 取值方式)`。
 
@@ -84,10 +86,13 @@ class 运行配置:
     开始提醒开关: bool = True
     结束偏移们: tuple[int, ...] = (-3, -1)
     开始偏移们: tuple[int, ...] = (0,)
+    只在有提醒时推送: bool = False
+    """没有节点命中时整次静默（连图都不发）。放 notify 是因为它引用的是"提醒"这一节算出来的结果。"""
     # push
     推送开关: bool = False
     推送时刻: str = "08:00"
     推送目标: tuple[str, ...] = ()
+    推送文案模板: str = "{提醒}"
 
     def 底栏分区(self) -> tuple[str, ...] | None:
         """要展示的底栏分区；三个都开时返回 None（走内核默认路径，行为与改造前一致）。"""

@@ -119,14 +119,16 @@ Noto CJK）」三层候选，缺字体不会出豆腐块。要跨机器逐像素
 | `panels.outfit` | bool | 开 | 底栏「新增时装」面板 |
 | `panels.module` | bool | 开 | 底栏「新增模组」面板 |
 | `data.auto_refresh_daily` | bool | 开 | 每天首次出图时自动更新数据；关掉后只出图不爬取 |
-| `notify.enabled` | bool | 开 | 提醒总开关；关掉后推送只发图 |
+| `notify.enabled` | bool | 开 | 节点提醒总开关；关掉后一个字的提醒都不发，推送只发图 |
 | `notify.end_enabled` | bool | 开 | 是否提醒「活动即将结束」 |
 | `notify.start_enabled` | bool | 开 | 是否提醒「活动开启」 |
 | `notify.end_offsets` | list | -3, -1 | **距结束**几天时提醒：-3 = 结束前 3 天、-1 = 最后一天、0 = 结束当天；留空 = 这类不提醒 |
 | `notify.start_offsets` | list | 0 | **距开始**几天时提醒：0 = 开启当天、-1 = 前一天；留空 = 这类不提醒 |
+| `notify.require_reminder` | bool | 关 | 只在有节点提醒时推送：当天没有任何节点命中就整次静默（连图都不发）。注意它和 `notify.enabled` 是一对——总开关关着就永远没有提醒 |
 | `push.enabled` | bool | 关 | 开启每日推送 |
 | `push.time` | string | 08:00 | 推送时刻（HH:MM，运行 AstrBot 那台机器的本地时间） |
 | `push.targets` | list | （空） | 推送目标会话；用 `/订阅甘特图` 加入、`/退订甘特图` 移出，也可以直接在这里增删 |
+| `push.text_template` | string | `{提醒}` | 有提醒那天附在图下面的文字；可用 `{提醒}`（提醒原文）、`{日期}`、`{条目数}`，留空 = 只发图 |
 
 改动任何一项，下一次出图就按新值渲染（数值越界会被后端夹到范围内）。
 
