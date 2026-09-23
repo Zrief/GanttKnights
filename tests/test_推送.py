@@ -167,7 +167,7 @@ def test_目标为空不武装_有目标才武装(tmp_path, 推送, 配置模块
     asyncio.run(跑())
 
 
-# ---------- 无提醒静默（push.only_when_reminder）与文案模板 ----------
+# ---------- 无提醒静默（notify.require_reminder）与文案模板 ----------
 
 
 def test_无提醒时默认照旧推图(tmp_path, 推送, 配置模块):
