@@ -6,7 +6,7 @@
 
 | 没做的 | 为什么 |
 |---|---|
-| **不自己记住会话**（阶段六改成配置项） | 起初的写法是"谁发过 `/方舟日程` 就记住谁"（`event.unified_msg_origin`）。但用户要**能在设置页里删掉某个群的推送**，于是目标会话搬进配置项 `push.targets`：列表为空时把第一个用指令的会话自动填进去，之后由用户在设置页增删（「每日推送」） |
+| **不自己记住会话**（阶段六改成配置项） | 起初的写法是"谁发过 `/方舟日程` 就记住谁"（`event.unified_msg_origin`）。但用户要**能在设置页里删掉某个群的推送**，于是目标会话搬进配置项 `push.targets`：在要推送的会话里发 `/订阅甘特图` 加入（群聊/私聊都可以，多个会话各订各的）、`/退订甘特图` 移出，也能在设置页增删（「每日推送」） |
 | **不做预热任务** | 渲染 1.2s。"提前 10 分钟渲染好"只是把同一件事挪个时间，却要多一个 job、一段配置和一份状态 |
 | **不做退避重试** | 数据文件的 mtime 天然就是重试判据（当天任何触发都会重抓一次）；投递失败记进状态、在 `/甘特图状态` 里可见即可 |
 | **不做平台能力预检** | `meta().support_proactive_message` 是 4.28 才有的字段且**默认 True**（信不过）。真要知道能不能推，发一次并把结果记下来比读字段更可靠 |
@@ -38,12 +38,33 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .配置 import 运行配置
 
+if TYPE_CHECKING:               # 只给注解用：运行时不建立到渲染模块的依赖
+    from .渲染 import 渲染服务
+
 logger = logging.getLogger("ganttknights")
+
+# ---------- 推送目标的增删（纯函数：不碰配置、也不碰宿主的保存接口）----------
+
+
+def 加进目标(目标们: tuple[str, ...], 会话: str) -> tuple[str, ...]:
+    """订阅：把一个会话追加到推送目标末尾。
+
+    幂等：已经在列表里就原样返回——调用方据此区分"订阅成功"与"重复订阅"，
+    不必自己再去查一遍（去重按字符串完全相等比较，`unified_msg_origin` 就是会话的唯一标识）。
+    """
+    return 目标们 if 会话 in 目标们 else (*目标们, 会话)
+
+
+def 移出目标(目标们: tuple[str, ...], 会话: str) -> tuple[str, ...]:
+    """退订：从推送目标里去掉一个会话（不在列表里则原样返回）。"""
+    return tuple(项 for 项 in 目标们 if 项 != 会话)
 
 任务ID = "ganttknights_daily_push"
 """稳定的 job id：同一插件只会有一个每日推送任务（`replace_existing=True`）。"""
@@ -79,7 +100,6 @@ class 推送状态:
 
     ```json
     {
-      "会话": ["aiocqhttp:GroupMessage:200000"],     // 谁用过 /方舟日程（最近在后）
       "已推": {"aiocqhttp:GroupMessage:200000": "2026-09-14"},
       "上次": {"时刻": "2026-09-14T08:00:03", "成功": 2, "失败": 0, "说明": ""}
     }
@@ -153,7 +173,13 @@ def _现在() -> str:
 class 推送服务:
     """把"每天推一次图"接到 APScheduler 上；发送动作由入口层注入。"""
 
-    def __init__(self, 渲染, 状态: 推送状态, 发送, 配置读取=None) -> None:
+    def __init__(
+        self,
+        渲染: 渲染服务,
+        状态: 推送状态,
+        发送: Callable[[str, str, str], Awaitable[bool]],
+        配置读取: Callable[[], 运行配置] | None = None,
+    ) -> None:
         self.渲染 = 渲染
         self.状态 = 状态
         self.发送 = 发送              # async (umo, 文本, 图片路径) -> bool
@@ -187,7 +213,7 @@ class 推送服务:
             if not 运行配置.推送开关:
                 return "推送：未开启"
             return ("推送：已开启，但推送目标列表还是空的"
-                    "（在目标群里发一次 /方舟日程 会自动加进去，也可以到插件设置里填）")
+                    "（在要推送的会话里发一次 /订阅甘特图，也可以到插件设置里填）")
 
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -238,7 +264,8 @@ class 推送服务:
         if not 运行配置.推送开关:
             return "推送：未开启"
         if self._调度器 is None:
-            return f"推送：已开启（{运行配置.推送时刻}），但推送目标列表是空的"
+            return (f"推送：已开启（{运行配置.推送时刻}），但推送目标列表是空的"
+                    "（用 /订阅甘特图 订阅本会话）")
         下次 = getattr(self._调度器.get_job(任务ID), "next_run_time", None)
         下次文本 = 下次.strftime("%m-%d %H:%M") if 下次 else "未排定"
         return f"推送：每天 {运行配置.推送时刻}，下次 {下次文本}"
@@ -264,7 +291,8 @@ class 推送服务:
             目标们 = 运行配置.推送目标
             if not 目标们:
                 self.状态.记失败("没有配置推送目标")
-                return "还没有配置推送目标（插件设置 → 每日推送 → 推送目标会话列表）"
+                return ("还没有配置推送目标"
+                        "（用 /订阅甘特图 订阅本会话，或在插件设置 → 每日推送 → 推送目标会话列表里填）")
             今天 = datetime.now().date().isoformat()
             待推 = [s for s in 目标们 if self.状态.该推吗(s, 今天)]
             if not 待推:

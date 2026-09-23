@@ -16,8 +16,9 @@
   字体/背景图留在插件目录里只读（「接上宿主」）；
 * **不留渲染缓存**：每次出图按当天数据现画（一次 matplotlib 几秒），
   从而不必维护签名、失效与落盘三套状态（「两次自我推翻」）；
-* **入口层只做四件事**：读配置、说一句进度、出图、发图。判断（数据要不要刷、背景选哪张）
-  全在 `渲染服务` 里——入口层多做一份"预判"只会多一条会分叉的路径；
+* **入口层只做五件事**：读配置、改订阅（`/订阅甘特图` / `/退订甘特图` 写回配置）、
+  说一句进度、出图、发图。判断（数据要不要刷、背景选哪张）全在 `渲染服务` 里——
+  入口层多做一份"预判"只会多一条会分叉的路径；
 * 指令与回调的元数据只有一份：`插件/指令.py` 的 `CommandSpec`（「接上宿主」）。
 """
 
@@ -55,9 +56,11 @@ import matplotlib  # noqa: E402,F401  —— 导入本身即"检查依赖"，别
 
 from .插件 import 文案  # noqa: E402
 from .插件.配置 import 读取配置  # noqa: E402
-from .插件.指令 import 刷新命令, 帮助命令, 甘特图命令, 状态命令, 初始化命令, 生成帮助文本  # noqa: E402
+from .插件.指令 import (  # noqa: E402
+    刷新命令, 帮助命令, 甘特图命令, 订阅命令, 退订命令, 状态命令, 初始化命令, 生成帮助文本,
+)
 from .插件.渲染 import 素材缺失, 渲染服务  # noqa: E402
-from .插件.推送 import 推送状态, 推送服务  # noqa: E402
+from .插件.推送 import 推送状态, 推送服务, 加进目标, 移出目标  # noqa: E402
 
 插件版本 = "0.1.3"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""
@@ -132,30 +135,55 @@ class GanttKnightsPlugin(Star):
         """现读配置（WebUI 改完无需重载插件；定时任务也走这里）"""
         return 读取配置(self.config)
 
-    # ==================== 推送目标 ====================
+    # ==================== 推送目标：订阅 / 退订 ====================
 
-    def _补齐首个推送目标(self, unified_msg_origin: str, 运行配置) -> None:
-        """`push.targets` 为空时，把"第一个用指令的会话"写进配置。
+    def _改订阅(self, unified_msg_origin: str, *, 订阅: bool) -> str:
+        """把本会话加进/移出 `push.targets`，返回给用户的一句话。
 
-        为什么写配置而不是状态文件：用户要能**在设置页里删掉某个群的推送**，
-        所以推送目标必须是配置项（`list` 型）。列表非空时一律不再自动添加——
-        用户删掉的那一项不该被下一次指令又加回来。
+        为什么写配置而不是状态文件：用户要能**在设置页里看到并删掉**推送目标，
+        所以它必须是配置项（`list` 型）；状态文件只留记账。
+
+        订阅对会话类型不设限（群聊、私聊都可以各订各的），也没有"首位"这回事——
+        `加进目标()` 只是在末尾追加，重复订阅是幂等的。
+
+        ⚠️ 写回失败必须**说出来**：这一步是用户显式下的命令，不像原来那次"顺手自动补齐"
+        （那时失败只记日志）；不说的话他会以为订阅成功了。
         """
-        if 运行配置.推送目标:
-            return
+        现有 = self.运行配置().推送目标
+        新的 = 加进目标(现有, unified_msg_origin) if 订阅 else 移出目标(现有, unified_msg_origin)
+        if 新的 == 现有:
+            return 文案.订阅已存在 if 订阅 else 文案.退订不存在
+
         节 = self.config.get("push") if hasattr(self.config, "get") else None
         if not isinstance(节, dict):
-            logger.warning("配置里没有 push 节，跳过自动填写推送目标")
-            return
-        节["targets"] = [unified_msg_origin]
+            return self._写回失败(unified_msg_origin, 订阅, "插件配置里没有 push 节")
+
+        节["targets"] = list(新的)
         保存 = getattr(self.config, "save_config", None)
-        if callable(保存):
-            try:
-                保存()
-            except Exception:
-                logger.exception("推送目标写回配置失败（本次运行仍然生效）")
-        logger.info("推送目标列表为空 → 已把本会话记进配置 push.targets：%s（可在插件设置里增删）",
-                    unified_msg_origin)
+        if not callable(保存):
+            # AstrBot 4.17 没有 AstrBotConfig.save_config（4.28 才有）→ 本次运行有效、重启会丢
+            return self._写回失败(unified_msg_origin, 订阅, "当前 AstrBot 版本不提供配置保存接口")
+        try:
+            保存()
+        except Exception:
+            logger.exception("推送目标写回配置失败：%s", unified_msg_origin)
+            return self._写回失败(unified_msg_origin, 订阅, "写盘出错，详见日志")
+
+        # 按新的目标列表重新武装（幂等且便宜）；否则要等下一次指令才会带上新目标
+        self.推送.确保任务(self.运行配置())
+        logger.info("推送目标已%s：%s（现共 %d 个会话）",
+                    "加入" if 订阅 else "移出", unified_msg_origin, len(新的))
+        if not 订阅:
+            return 文案.退订成功
+        if self.运行配置().推送开关:
+            return 文案.订阅成功
+        return f"{文案.订阅成功}\n{文案.推送开关未开}"
+
+    def _写回失败(self, unified_msg_origin: str, 订阅: bool, 原因: str) -> str:
+        """配置写不进去时的同一句话（订阅是"手动加上"，退订是"手动删掉"）"""
+        return 文案.写回失败.format(
+            原因=原因, 会话=unified_msg_origin, 动作="手动加上" if 订阅 else "手动删掉"
+        )
 
     async def _发送(self, unified_msg_origin: str, 文本: str, 图片路径: str) -> bool:
         """把"文字 + 图片"投递到指定会话：**分两条发**（有文字才先发文字）。
@@ -191,11 +219,8 @@ class GanttKnightsPlugin(Star):
     async def 出图(self, event: AstrMessageEvent):
         """生成明日方舟近期活动甘特图长图。"""
         运行配置 = self.运行配置()
-        # 推送目标列表为空时，把"第一个用指令的会话"写进配置项 `push.targets`：
-        # 零配置也能用上推送；写进配置之后它就在设置页里可见、可删（用户要的"能删订阅"）。
-        self._补齐首个推送目标(event.unified_msg_origin, 运行配置)
         # 顺手重新武装一次定时任务（配置在 WebUI 里改过时不必重启插件）
-        self.推送.确保任务(self.运行配置())
+        self.推送.确保任务(运行配置)
         yield event.plain_result(文案.准备中)
         try:
             结果 = await self.渲染.出图(
@@ -212,6 +237,16 @@ class GanttKnightsPlugin(Star):
         except Exception:
             logger.exception("生成甘特图失败")
             yield event.plain_result(文案.渲染失败)
+
+    @filter.command(订阅命令.name, alias=订阅命令.alias_set)
+    async def 订阅(self, event: AstrMessageEvent):
+        """把本会话加入每日推送（群聊、私聊都可以）。"""
+        yield event.plain_result(self._改订阅(event.unified_msg_origin, 订阅=True))
+
+    @filter.command(退订命令.name, alias=退订命令.alias_set)
+    async def 退订(self, event: AstrMessageEvent):
+        """把本会话移出每日推送。"""
+        yield event.plain_result(self._改订阅(event.unified_msg_origin, 订阅=False))
 
     @filter.command(状态命令.name, alias=状态命令.alias_set)
     async def 状态(self, event: AstrMessageEvent):
@@ -296,7 +331,7 @@ class GanttKnightsPlugin(Star):
         快照日期 = self.渲染.最近变化日期() or "无"
         目标们 = 运行配置.推送目标
         本会话 = event.unified_msg_origin
-        在列 = "已在目标里" if 本会话 in 目标们 else "不在目标里"
+        在列 = "已在推送目标里" if 本会话 in 目标们 else "不在推送目标里（发 /订阅甘特图 加入）"
         上次 = self.推送状态.上次()
         上次行 = ""
         if 上次:
