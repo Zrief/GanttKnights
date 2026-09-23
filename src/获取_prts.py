@@ -13,6 +13,11 @@ PRTS_API = "https://prts.wiki/api.php"
 PRTS_HOME = "https://prts.wiki/"
 
 CLIENT = httpx.Client(timeout=30, follow_redirects=True)
+"""进程级连接池：导入期建一次，之后所有请求复用它（httpx.Client 是线程安全的）。"""
+
+# ⚠️ 这是内核里唯一动**全局**日志的地方，是有意为之，别当成越界"清理"掉：
+# httpx 每个请求打两行 INFO，而 AstrBot 把 root logger 开在 INFO——一次出图要发几十个请求，
+# 不压下去会把宿主日志淹掉。这里只设 httpx 自己那个 logger 的级别，不碰其它 logger。
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _RETRYABLE = (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ReadError)

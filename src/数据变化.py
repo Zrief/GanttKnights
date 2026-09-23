@@ -22,7 +22,8 @@
 刻意**没有**"不再列出"：抓取是增量的（公告页没变化就不重读），"这次没抓到"推不出"源里没了"
 ——那段推理见 `src/汇总_活动.py::合并差异` 的 docstring。
 
-模块只依赖标准库，可以在没装 AstrBot / matplotlib 的机器上直接测。
+模块只用到标准库（连同 `src/汇总_活动.py` 这个同包依赖），可以在没装 AstrBot /
+matplotlib 的机器上直接测。
 """
 
 from __future__ import annotations
@@ -33,6 +34,8 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .汇总_活动 import 合并差异
 
 logger = logging.getLogger("ganttknights")
 
@@ -157,7 +160,7 @@ def 读(路径: Path | str, 日期: str = "") -> 数据变化 | None:
     return 变化
 
 
-def 记下并取(路径: Path | str, 差异, 今天: str) -> 数据变化:
+def 记下并取(路径: Path | str, 差异: 合并差异, 今天: str) -> 数据变化:
     """把这次合并的差异记下来；**同一天已有记录就不再改写**。
 
     返回"今天的日差"（新的或当天早先记下的那份）。

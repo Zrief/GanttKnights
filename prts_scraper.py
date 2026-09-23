@@ -1,4 +1,11 @@
-"""CLI 入口 — 单独跑一次爬取并在控制台打印结果"""
+"""对账工具 — 单独跑一次爬取，把活动列表打到控制台（只读，不落盘）。
+
+与 `cli.py` 的分工：`cli.py` 是**出图**入口（会更新数据、渲染产物）；这里只回答
+"PRTS 现在返回了哪些活动、时间是什么"，用来人工核对解析结果，不写任何文件。
+
+时间在函数内求值，不在模块级冻结：本模块的 `爬取()` 可能被当包导入复用，
+那样"导入即取时间"会在这类长驻场景里变成陈旧值（同 `src/流水线.py::今天写过` 的约定）。
+"""
 
 from __future__ import annotations
 
@@ -15,12 +22,12 @@ from src.汇总_活动 import (
 
 logger = logging.getLogger("prts_scraper")
 
-现在时间 = datetime.now()
-现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
 
-
-def 爬取(限制: int = 10, 回溯已结束: bool = False) -> list[dict]:
-    """串联 获取→解析→合并→排序 的完整流程"""
+def 爬取(限制: int = 10, 回溯已结束: bool = False,
+         现在时间: datetime | None = None) -> list[dict]:
+    """串联 获取→解析→合并→排序 的完整流程（只读，不落盘）"""
+    现在时间 = 现在时间 or datetime.now()
+    现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
     api原始 = 获取事件列表(限制)
     if not api原始:
         logger.warning("API 未返回数据")
@@ -44,7 +51,9 @@ def main():
     )
     logger.info("正在获取活动数据 (limit=%d)...", 限制)
 
-    activities = 爬取(限制, 回溯已结束=回溯已结束)
+    现在时间 = datetime.now()
+    现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
+    activities = 爬取(限制, 回溯已结束=回溯已结束, 现在时间=现在时间)
     if not activities:
         logger.warning("未获取到活动数据")
         sys.exit(1)

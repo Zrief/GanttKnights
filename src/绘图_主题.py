@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image as PILimage
@@ -227,10 +227,6 @@ class 主题:
     def 描边RGB(self) -> tuple[int, int, int, int]:
         r, g, b = (int(self.描边[i:i + 2], 16) for i in (1, 3, 5))
         return r, g, b, 255
-
-    def 摘要(self) -> str:
-        return (f"主色相{self.主色相:.0f}° 副色相{self.副色相:.0f}° "
-                f"警告色相{self.警告色相:.0f}°")
 
 
 def _建主题_计算(背景路径: str | None = None) -> 主题:
