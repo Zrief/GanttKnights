@@ -22,8 +22,8 @@
 刻意**没有**"不再列出"：抓取是增量的（公告页没变化就不重读），"这次没抓到"推不出"源里没了"
 ——那段推理见 `src/汇总_活动.py::合并差异` 的 docstring。
 
-模块只用到标准库（连同 `src/汇总_活动.py` 这个同包依赖），可以在没装 AstrBot /
-matplotlib 的机器上直接测。
+模块只用到标准库（连同 `src/汇总_活动.py`、`src/提醒文案.py` 这两个同包依赖——
+后者只 import `re`），可以在没装 AstrBot / matplotlib 的机器上直接测。
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .汇总_活动 import 合并差异
+from .提醒文案 import 展示名
 
 logger = logging.getLogger("ganttknights")
 
@@ -74,7 +75,7 @@ class 数据变化:
         段: list[str] = []
 
         def 列(图标: str, 名们: tuple[str, ...]) -> str:
-            头 = "、".join(名们[:最大列名数])
+            头 = "、".join(展示名(名) for 名 in 名们[:最大列名数])   # 与图上同一套名字规范
             多 = f" 等 {len(名们)} 个" if len(名们) > 最大列名数 else ""
             return f"{图标} {头}{多}"
 

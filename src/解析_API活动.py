@@ -184,10 +184,14 @@ def API转活动列表(api原始: list[dict], 现在时间: str, 回溯已结束
             continue
         api类型 = (属性.get("活动类型") or [None])[0] or ""
         显示名 = 事件名
+        # 长期玩法用官方名当前缀（左列不细分长期，名字得说清是哪一种）；
+        # 「肉鸽」是黑话，PRTS 的 SMW「活动类型」本来就写「集成战略」
         if api类型 == "集成战略":
-            显示名 = f"【肉鸽】{事件名}"
+            显示名 = f"【集成战略】{事件名}"
         elif api类型 == "合作活动":
             显示名 = f"【联动】{事件名}"
+        elif api类型 == "生息演算":
+            显示名 = f"【生息演算】{事件名}"
         开始dt = datetime.strptime(开始, "%Y-%m-%d %H:%M:%S")
         结束dt = datetime.strptime(结束, "%Y-%m-%d %H:%M:%S")
         待处理.append({

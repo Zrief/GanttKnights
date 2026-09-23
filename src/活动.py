@@ -30,13 +30,28 @@ class 活动:
     开始: datetime
     结束: datetime
     类型: int
+    子类型: str = ""
+    """大类里的细分，目前只有卡池在用：`限时` / `中坚` / `标准` / `甄选`。
+
+    它只做两件事：甘特图左列据此分组（同名相邻）、`提醒文案.展示名` 据此把名字里的
+    前缀与期号剥掉。空串 = 这个大类不细分（活动 / 福利 / 长期）。
+    """
     来源: str = ""
 
 
-def 排序键(条目: 活动) -> tuple[int, datetime, datetime]:
-    """与改造前 pandas 的 `sort_values(by=[类型, 结束, 开始], ascending=False)` 等价。
+子类型顺序 = ("限时", "中坚", "标准", "甄选")
+"""同大类里的细分顺序 —— 甘特图左列从上到下就是这个次序；不认识的排最后。"""
 
-    pandas 是**三键全降序**，因此调用方用 `sorted(条目们, key=排序键, reverse=True)`。
-    int 与 datetime 都支持比较，无需额外转换。
+
+def 子类型序数(子类型: str) -> int:
+    return 子类型顺序.index(子类型) if 子类型 in 子类型顺序 else len(子类型顺序)
+
+
+def 排序键(条目: 活动) -> tuple[int, int, datetime, datetime]:
+    """在改造前 pandas 的 `sort_values(by=[类型, 结束, 开始], ascending=False)` 上，
+    多插一档 `子类型`（2026-09-24：卡池要按池子种类成块，见 `子类型顺序`）。
+
+    四键仍**全降序**，因此调用方用 `sorted(条目们, key=排序键, reverse=True)`；
+    渲染层再 `reversed` 一次，图上从上到下就是"限时 → 中坚 → 标准 → 甄选 → …"。
     """
-    return (条目.类型, 条目.结束, 条目.开始)
+    return (条目.类型, 子类型序数(条目.子类型), 条目.结束, 条目.开始)

@@ -27,7 +27,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from .活动 import 活动
-from .提醒文案 import 条目行, 组头, 省略行, 最多列几行
+from .提醒文案 import 条目行, 组头, 省略行, 最多列几行, 提醒名
 
 结束偏移默认: tuple[int, ...] = (-3, -1)
 开始偏移默认: tuple[int, ...] = (0,)
@@ -78,7 +78,7 @@ def 生成提醒(
             if 已列 >= 最多列几行:
                 省略 += 1
                 continue
-            该组.append(条目行(事件.名称, 事件.类型))
+            该组.append(条目行(提醒名(事件.名称, 事件.子类型), 事件.类型))
             已列 += 1
         if 该组:
             行们.append(组头文本)

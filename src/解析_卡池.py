@@ -15,11 +15,14 @@ from .获取_prts import PRTS_API, 请求
 
 logger = logging.getLogger(__name__)
 
-# 分区标题关键词 → 名称前缀 → 是否带序号列
-分区规则: list[tuple[str, str, bool]] = [
-    ("限时寻访", "【寻访】", False),
-    ("常驻标准寻访", "【标准池】", True),
-    ("常驻中坚寻访", "【中坚池】", True),
+# 分区标题关键词 → 名称前缀 → 是否带序号列 → 左栏用的子类型
+#
+# 第 4 项是「限时 / 中坚 / 标准 / 甄选」四档（2026-09-24 定）：它进 `活动.子类型`，
+# 甘特图左列据此分组，名字里的 `【中坚池】#74` 前缀与期号则被 `提醒文案.展示名` 剥掉。
+分区规则: list[tuple[str, str, bool, str]] = [
+    ("限时寻访", "【寻访】", False, "限时"),
+    ("常驻标准寻访", "【标准池】", True, "标准"),
+    ("常驻中坚寻访", "【中坚池】", True, "中坚"),
 ]
 
 时间_RE = re.compile(
@@ -51,12 +54,12 @@ def 抓取卡池一览() -> list[dict]:
 def 解析卡池wikitext(wikitext: str) -> list[dict]:
     """把 卡池一览 wikitext 解析为卡池条目（纯函数，便于离线测试）"""
     结果: list[dict] = []
-    for 关键词, 前缀, 带序号 in 分区规则:
+    for 关键词, 前缀, 带序号, 子类型 in 分区规则:
         区文本 = _提取分区(wikitext, 关键词)
         if not 区文本:
             logger.warning("卡池一览未找到分区: %s", 关键词)
             continue
-        条目 = _解析分区表格(区文本, 前缀, 带序号)
+        条目 = _解析分区表格(区文本, 前缀, 带序号, 子类型)
         logger.info("  %s: %d 条", 关键词, len(条目))
         结果.extend(条目)
     logger.info("解析卡池一览: %d 条", len(结果))
@@ -127,7 +130,7 @@ def _表格行(区文本: str) -> list[list[str]]:
     return 行们
 
 
-def _解析分区表格(区文本: str, 前缀: str, 带序号: bool) -> list[dict]:
+def _解析分区表格(区文本: str, 前缀: str, 带序号: bool, 子类型: str) -> list[dict]:
     结果: list[dict] = []
     for cells in _表格行(区文本):
         try:
@@ -144,6 +147,9 @@ def _解析分区表格(区文本: str, 前缀: str, 带序号: bool) -> list[di
         名称 = _卡池名称(前缀, 带序号, 序号, 名单元格)
         if not 名称:
             continue
+        # 「常驻中坚寻访&中坚甄选」是同一个分区：甄选池的名字里自带「甄选」，
+        # 据它把这一条从「中坚」改判成「甄选」，左栏才不会把两种池子混成一组
+        细分 = "甄选" if "甄选" in 名称 else 子类型
         干员们 = list(dict.fromkeys(m.group(1).strip() for m in 干员_RE.finditer(六星单元格)))
         if 干员们:
             名称 = f"{名称} · {' / '.join(干员们)}"
@@ -152,6 +158,7 @@ def _解析分区表格(区文本: str, 前缀: str, 带序号: bool) -> list[di
             "开始时间": f"{tm.group(1)} {tm.group(2)}:00",
             "结束时间": f"{tm.group(3)} {tm.group(4)}:00",
             "类型": 0,
+            "子类型": 细分,
         })
     return 结果
 

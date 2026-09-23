@@ -44,13 +44,22 @@ from .绘图_图表 import 缩放图片
 from .绘图_颜色 import set_alpha_channel
 from .绘图_主题 import 主题
 from .字体 import 注册字体, 字体指纹
+from .提醒文案 import 展示名
 
 logger = logging.getLogger(__name__)
 
 # —— 文案（颜色一律由 建主题(背景图) 推导，这里不写死任何色值）——
 图标题 = "近期活动一览"
-类型序 = (0, 1, 2, 99)
 类型关键词 = {0: "寻访", 1: "活动", 2: "福利", 99: "长期"}
+组顺序 = ("限时", "中坚", "标准", "甄选", "活动", "福利", "长期")
+"""甘特图左列从上到下的分组：卡池先按池子种类细分（`活动.子类型`），其余按大类。
+
+顺序与 `活动.子类型顺序` 一致。组数比大类多，但每组名都是两个字，左列宽度不用改。"""
+
+
+def 组标签(条目) -> str:
+    """一条记录归到哪个左列分组：有子类型就用子类型，否则用大类的关键词。"""
+    return 条目.子类型 or 类型关键词.get(条目.类型, "")
 区名表 = ("凭证兑换", "新增时装", "新增模组")
 新增键 = {"凭证兑换": "凭证", "新增时装": "时装", "新增模组": "模组"}
 周名 = ["一", "二", "三", "四", "五", "六", "日"]
@@ -133,13 +142,23 @@ DPI = 150
 底栏带_不透明 = 0.90      # 最深处的不透明度
 底栏带_曲线 = 1.0         # 渐隐曲线指数：1 = 线性，越大越"只贴着顶部"
 底栏带_亮度 = 0.80        # 标题带色的明度：够亮才配得起深色标题字
+
+# —— 甘特条上的名字：条**里**与条**外**（引线）共用同一套字号 / 字重 / 描边 ——
+# 曾经条内是 15px 粗体带描边、条外是 13px 常规无描边——同一个活动名两种长相，2026-09-24 统一。
+# 颜色仍各自跟底色走（条内 = 对色，条外 = 主文），那是物理约束不是风格。
+条名_字号 = 15
+条名_字重 = 粗字重
+条名_描边 = 0.7
 头像圆角比 = 0.06         # 头像几乎方形，只把尖角磨掉一点
 头像描边px = 2
 
 
-def 类型弧度表() -> dict[int, float]:
-    """事件类型 → 色弧上的位置（主色 → 副色连续过渡）"""
-    return {类: i / (len(类型序) - 1) for i, 类 in enumerate(类型序)}
+def 组弧度表() -> dict[str, float]:
+    """左列分组 → 色弧上的位置（主色 → 副色连续过渡）。
+
+    组名、左列色轨、组内每根条的条色三处同源——一个颜色，一眼对得上。
+    """
+    return {名: i / (len(组顺序) - 1) for i, 名 in enumerate(组顺序)}
 
 
 def 区弧度表() -> dict[str, float]:
@@ -402,29 +421,29 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         return 甘特左列px + 小时 / 总小时 * 绘图宽px
 
     显示 = list(reversed(记录))   # 倒序：卡池在上、长期在下（沿用原图观感）
-    弧度 = 类型弧度表()
+    弧度 = 组弧度表()
     名字号 = 15
-    类们 = [条目.类型 for 条目 in 显示]
+    标签们 = [组标签(条目) for 条目 in 显示]
 
-    # 同类型连续的行归为一个功能块，块内给左列一条色轨、块间加分隔线，
-    # 这样即使四个类型的颜色相近，也能一眼看出分组边界
-    组们: list[tuple[int, int, int]] = []
+    # 标签相同的连续行归为一个功能块，块内给左列一条色轨、块间加分隔线，
+    # 这样即使相邻两组的颜色相近，也能一眼看出分组边界
+    组们: list[tuple[int, int, str]] = []
     i = 0
-    while i < len(类们):
+    while i < len(标签们):
         j = i
-        while j + 1 < len(类们) and 类们[j + 1] == 类们[i]:
+        while j + 1 < len(标签们) and 标签们[j + 1] == 标签们[i]:
             j += 1
-        组们.append((i, j, 类们[i]))
+        组们.append((i, j, 标签们[i]))
         i = j + 1
-    for 起, 止, 类 in 组们:
-        组色 = 主题.大色块(弧度.get(类, 0.0))
+    for 起, 止, 标签 in 组们:
+        组色 = 主题.大色块(弧度.get(标签, 0.0))
         ax.add_patch(Rectangle((0, 顶 - (止 + 1) * 甘特行高px), 甘特左列px,
                                (止 - 起 + 1) * 甘特行高px,
                                facecolor=组色, alpha=0.17, edgecolor="none", zorder=0.6))
         # 组名写在**整组的垂直中心**：跨多行时那是视觉中心，而不是"只属于第一行"；
         # 组内每行不再重复写，靠左列这条色轨认（颜色仍与条色同源，一眼对上）
         ax.text(18, 顶 - (起 + (止 - 起 + 1) / 2) * 甘特行高px,
-                类型关键词.get(类, ""), fontsize=11.5,
+                标签, fontsize=11.5,
                 color=组色, ha="left", va="center", zorder=4,
                 fontweight=粗字重, path_effects=粗体(组色, 0.6))
     for 起, _, _ in 组们[1:]:
@@ -451,10 +470,9 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
 
     # 行
     for i, 条目 in enumerate(显示):
-        名 = 条目.名称
+        名 = 展示名(条目.名称)
         始, 终 = 条目.开始, 条目.结束
-        类 = 条目.类型
-        条色 = 主题.大色块(弧度.get(类, 0.0))
+        条色 = 主题.大色块(弧度.get(组标签(条目), 0.0))
         y顶 = 顶 - i * 甘特行高px
         y底 = y顶 - 甘特行高px
 
@@ -477,23 +495,25 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         条.set_path_effects([SimplePatchShadow(offset=(0, -3), alpha=0.30), Normal()])
         ax.add_patch(条)
 
-        # 名字：优先写在条里；条太短就引到条外（右优先，其次左侧）
+        # 名字：优先写在条里；条太短就引到条外（右优先，其次左侧）。
+        # 两处共用 条名_字号 / 条名_字重 / 条名_描边，只有颜色跟底色走
         字色 = 主题.对色(条色)
-        名宽 = 文本宽(名, 名字号, weight=粗字重)   # 条上的名字是无衬线粗体
-        if x1 - x0 >= 名宽 + 26:
-            ax.text((x0 + x1) / 2, y中, 名, fontsize=名字号, color=字色,
-                    ha="center", va="center", zorder=4, clip_path=条, fontweight=粗字重,
-                    path_effects=粗体(字色, 0.7))
-        elif 轴宽 - x1 >= 名宽 + 60:
-            ax.annotate(名, xy=(x1, y中), xytext=(x1 + 14, y中),
+        名宽 = 文本宽(名, 条名_字号, weight=条名_字重)
+        条内够放 = x1 - x0 >= 名宽 + 26
+        右够 = 轴宽 - x1 >= 名宽 + 60
+        左够 = x0 >= 名宽 + 60
+        if 条内够放:
+            ax.text((x0 + x1) / 2, y中, 名, fontsize=条名_字号, color=字色,
+                    ha="center", va="center", zorder=4, clip_path=条, fontweight=条名_字重,
+                    path_effects=粗体(字色, 条名_描边))
+        elif 右够 or 左够:
+            靠右 = 右够
+            锚x = x1 if 靠右 else x0
+            ax.annotate(名, xy=(锚x, y中), xytext=(锚x + (14 if 靠右 else -14), y中),
                         arrowprops=dict(arrowstyle="-", color=主题.次文, lw=1.2),
-                        fontsize=名字号 - 2, color=主题.主文,
-                        ha="left", va="center", zorder=4)
-        elif x0 >= 名宽 + 60:
-            ax.annotate(名, xy=(x0, y中), xytext=(x0 - 14, y中),
-                        arrowprops=dict(arrowstyle="-", color=主题.次文, lw=1.2),
-                        fontsize=名字号 - 2, color=主题.主文,
-                        ha="right", va="center", zorder=4)
+                        fontsize=条名_字号, color=主题.主文, fontweight=条名_字重,
+                        path_effects=粗体(主题.主文, 条名_描边),
+                        ha="left" if 靠右 else "right", va="center", zorder=4)
 
     # 顶部日期轴带（半透明，背景图仍能透出）+ 左列右边界
     ax.add_patch(Rectangle((0, 顶), 轴宽, 甘特轴带px, facecolor=主题.更深,
