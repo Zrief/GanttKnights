@@ -126,6 +126,13 @@ DPI = 150
 顶条px = 4                # 卡片顶部色条
 标题行px = 36
 卡圆角px = 10             # 面板圆角：直角太锐，只磨一点点
+
+# —— 底栏卡片的"标题带"：淡而浊的一层，从卡片顶部一路渐隐，配本区深色标题字 ——
+# （对照过"深艳实带 + 反白字"与"顶部细色条"两版：实带太跳、细条又几乎看不见；
+#   定稿靠"淡色带 + 长渐变"给装饰性，色相识别由色带与标题字色双重承载）
+底栏带_不透明 = 0.90      # 最深处的不透明度
+底栏带_曲线 = 1.0         # 渐隐曲线指数：1 = 线性，越大越"只贴着顶部"
+底栏带_亮度 = 0.80        # 标题带色的明度：够亮才配得起深色标题字
 头像圆角比 = 0.06         # 头像几乎方形，只把尖角磨掉一点
 头像描边px = 2
 
@@ -410,14 +417,21 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         组们.append((i, j, 类们[i]))
         i = j + 1
     for 起, 止, 类 in 组们:
+        组色 = 主题.大色块(弧度.get(类, 0.0))
         ax.add_patch(Rectangle((0, 顶 - (止 + 1) * 甘特行高px), 甘特左列px,
                                (止 - 起 + 1) * 甘特行高px,
-                               facecolor=主题.大色块(弧度.get(类, 0.0)),
-                               alpha=0.17, edgecolor="none", zorder=0.6))
+                               facecolor=组色, alpha=0.17, edgecolor="none", zorder=0.6))
+        # 组名写在**整组的垂直中心**：跨多行时那是视觉中心，而不是"只属于第一行"；
+        # 组内每行不再重复写，靠左列这条色轨认（颜色仍与条色同源，一眼对上）
+        ax.text(18, 顶 - (起 + (止 - 起 + 1) / 2) * 甘特行高px,
+                类型关键词.get(类, ""), fontsize=11.5,
+                color=组色, ha="left", va="center", zorder=4,
+                fontweight=粗字重, path_effects=粗体(组色, 0.6))
     for 起, _, _ in 组们[1:]:
         y = 顶 - 起 * 甘特行高px
         ax.add_line(Line2D([0, 轴宽], [y, y], color=主题.主文, alpha=0.26,
                            linewidth=1.8, zorder=2.6))
+
 
     # 每日竖网格
     for d in range(总天 + 1):
@@ -430,10 +444,10 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         日 = 左边界 + timedelta(days=d)
         if 日.weekday() >= 5:
             ax.add_patch(Rectangle((x(d * 24), 0), 一格宽, 顶, facecolor="white",
-                                   alpha=0.055, edgecolor="none", zorder=1.4))
+                                   alpha=0.09, edgecolor="none", zorder=1.4))
     今天柱 = x(24 * 今天日序)
     ax.add_patch(Rectangle((今天柱, 0), 一格宽, 顶, facecolor=主题.今天,
-                           alpha=0.16, edgecolor="none", zorder=1.5))
+                           alpha=0.28, edgecolor="none", zorder=1.5))
 
     # 行
     for i, 条目 in enumerate(显示):
@@ -447,11 +461,6 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         ax.add_line(Line2D([0, 轴宽], [y底, y底], color=主题.分隔, linewidth=1, zorder=2))
         ax.add_patch(Rectangle((0, y底), 7, 甘特行高px, facecolor=条色,
                                edgecolor="none", zorder=3))
-        # 左列的类型关键词跟着本类型的颜色走，和条色一致，一眼对上
-        ax.text(18, y底 + 甘特行高px / 2, 类型关键词.get(类, ""), fontsize=11.5,
-                color=条色, ha="left", va="center", zorder=4,
-                fontweight=粗字重, path_effects=粗体(条色, 0.6))
-
         起小时 = max((始 - 左边界).total_seconds() / 3600, 0)
         止小时 = min((终 - 左边界).total_seconds() / 3600, 总小时)
         if 止小时 <= 起小时:
@@ -460,8 +469,11 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         条高 = 甘特行高px * 0.60
         y0 = y底 + (甘特行高px - 条高) / 2
         y中 = y0 + 条高 * 0.5
-        条 = Rectangle((x0, y0), x1 - x0, 条高, facecolor=条色,
-                       edgecolor="none", zorder=3)
+        # 小圆角：dpi 150 下 1 数据单位 = 1 像素，所以 rounding_size 就是像素值；
+        # pad=0 是必须的，否则 boxstyle 会把矩形向外撑开
+        条 = FancyBboxPatch((x0, y0), x1 - x0, 条高,
+                            boxstyle="round,pad=0,rounding_size=2.5",
+                            facecolor=条色, edgecolor="none", zorder=3)
         条.set_path_effects([SimplePatchShadow(offset=(0, -3), alpha=0.30), Normal()])
         ax.add_patch(条)
 
@@ -578,7 +590,7 @@ def 填行(ax, fig, 行: list[tuple], 格宽px: float, 主题: 主题) -> None:
     for 区名, 标签, 条目们, 起px in 行:
         卡宽 = len(条目们) * 格宽px
         t = 弧度.get(区名, 0.0)
-        色 = 主题.小色块(t)
+        色 = 主题.标题色(t, 底栏带_亮度)
         # 卡高按内容走：只有干员名（凭证）就没有第二条的位置，不留空
         有两行 = any(条目.get("名称") for 条目 in 条目们)
         卡底y = 副题顶y - 副题px - 10 if 有两行 else 名字顶y - 名字px - 10
@@ -591,20 +603,18 @@ def 填行(ax, fig, 行: list[tuple], 格宽px: float, 主题: 主题) -> None:
                             facecolor=主题.面板底(t), edgecolor="none", zorder=1)
         卡.set_path_effects([SimplePatchShadow(offset=(0, -4), alpha=0.35), Normal()])
         ax.add_patch(卡)
-        # 标题行做成一条本区色带，标题用反白字——分区识别度最高，缩到手机宽度也不丢
-        带轴 = (顶条px + 标题行px) / 卡高
-        分界 = int(128 * (1 - 带轴))
-        纵 = np.zeros((128, 1))
-        纵[分界:, 0] = 1.0
-        起 = max(分界 - int(128 * 0.16), 0)
-        纵[起:分界, 0] = np.linspace(0.0, 1.0, 分界 - 起) ** 1.5
-        带 = ax.imshow(_色带(色, 纵 * np.ones((1, 128)), 0.95),
+        # 标题带：从卡片**最顶上**一路渐隐到底（不是"标题行下沿才起渐变"，那样像贴了一块色）
+        纵 = np.linspace(0.0, 1.0, 128) ** 底栏带_曲线
+        带 = ax.imshow(_色带(色, 纵 * np.ones((1, 128)), 底栏带_不透明),
                        extent=(起px, 起px + 卡宽, 卡底y, 轴高), aspect="auto",
                        zorder=1.2, interpolation="bilinear", origin="lower")
-        带.set_clip_path(卡)          # 让色带跟着圆角收紧，不然四角会冒出去
-        ax.text(起px + 16, 题下y + 标题行px / 2, 标签, fontsize=15,
-                color=主题.对色(色), family=标题族, ha="left", va="center", zorder=3,
-                fontweight=粗字重, path_effects=粗体(主题.对色(色), 0.9))
+        带.set_clip_path(卡)            # 让色带跟着圆角收紧，不然四角会冒出去
+        # 标题压在本区深色字上（色带够淡，正是为它让路）；位置往下压 1/6 行高（6px），
+        # 免得离卡片上沿太近、离头像又太远，上下留白看起来就对称了
+        题色 = 主题.面板标题色(t)
+        ax.text(起px + 16, 题下y + 标题行px / 3, 标签, fontsize=15,
+                color=题色, family=标题族, ha="left", va="center", zorder=3,
+                fontweight=粗字重, path_effects=粗体(题色, 0.9))
 
         for j, 条目 in enumerate(条目们):
             cx = 起px + j * 格宽px + 格宽px / 2
