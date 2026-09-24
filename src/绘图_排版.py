@@ -714,11 +714,14 @@ def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]
     """搜索底栏版面 → 建画布 → 画页眉/甘特/底栏 → 存图；返回版面概况"""
     _确保字体就绪()
     有效 = [(区名, 条目们) for 区名, 条目们 in 分区 if 条目们]
-    行们, 格宽px = 选版面(有效)
-    fig, gs, ax_页眉, ax_chart = 建分区画布(len(记录), len(行们), 主题, 背景路径)
+    底栏行们, 格宽px = 选版面(有效)
+    # ⚠️ 两个"行"不是一回事：`底栏行们` 是底栏的卡片行，甘特的行数得按 `分行()` 算——
+    # 铺满全图的常驻条会并成一行，还用 len(记录) 就会在甘特底下多留一块空白（2026-09-24 修）。
+    甘特行数 = len(分行(记录, 左边界, 右边界))
+    fig, gs, ax_页眉, ax_chart = 建分区画布(甘特行数, len(底栏行们), 主题, 背景路径)
     填页眉(ax_页眉, fig, 主题, 现在, 标题)
     填甘特区(ax_chart, fig, 记录, 主题, 左边界, 右边界, 现在)
-    for r, 行 in enumerate(行们):
+    for r, 行 in enumerate(底栏行们):
         填行(行轴(fig, gs, r), fig, 行, 格宽px, 主题)
     目标 = Path(输出路径)
     目标.parent.mkdir(parents=True, exist_ok=True)
@@ -726,8 +729,8 @@ def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]
         fig.savefig(目标, dpi=DPI, facecolor=fig.get_facecolor())
     finally:
         plt.close(fig)
-    if not 行们:
+    if not 底栏行们:
         return "无底栏条目"
     概况 = " + ".join(" | ".join(f"{标签}×{len(块)}" for _, 标签, 块, _ in 行)
-                     for 行 in 行们)
-    return f"{len(行们)} 行 / 格宽{格宽px:.0f}px / {概况}"
+                     for 行 in 底栏行们)
+    return f"{len(底栏行们)} 行 / 格宽{格宽px:.0f}px / {概况}"
