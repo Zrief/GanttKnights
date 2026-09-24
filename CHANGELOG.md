@@ -7,6 +7,8 @@
 
 ## [未发布]
 
+## [0.1.5] - 2026-09-24
+
 ### 修复
 
 - **长期活动在图上重复出现**：活动前缀换过写法（公告 `【剿灭】` → 官方名 `【剿灭作战】`、
@@ -202,6 +204,7 @@
 - 剿灭、保全等长期任务检测不出来（日常增量会跳过已结束活动的公告页）
 - 公告年份解析错误，导致复刻/长期活动被排到错误的年份
 
+[0.1.5]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.5
 [0.1.4]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Zrief/GanttKnights/releases/tag/v0.1.2

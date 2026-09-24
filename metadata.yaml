@@ -8,7 +8,7 @@ desc: |
   - `/方舟日程` 出图（首次自动抓取数据）；其余指令见 `/甘特图帮助`
   - 可开每日定时推送：只在「即将结束 / 今天开启」这类节点附一句文字，平时只发图；也能设成没有提醒就整次静默
   - 时间窗、底栏面板、背景图、提醒节点、推送时刻都能在插件配置里改
-version: 0.1.4
+version: 0.1.5
 author: Zrief
 repo: https://github.com/Zrief/GanttKnights
 astrbot_version: ">=4.17.0"
