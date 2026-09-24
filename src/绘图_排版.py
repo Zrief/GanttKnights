@@ -40,6 +40,7 @@ from PIL import Image as PILimage
 from PIL import ImageChops, ImageDraw
 
 from .config import settings
+from .甘特行 import 分行
 from .绘图_图表 import 缩放图片
 from .绘图_颜色 import set_alpha_channel
 from .绘图_主题 import 主题
@@ -60,6 +61,9 @@ logger = logging.getLogger(__name__)
 def 组标签(条目) -> str:
     """一条记录归到哪个左列分组：有子类型就用子类型，否则用大类的关键词。"""
     return 条目.子类型 or 类型关键词.get(条目.类型, "")
+
+
+
 区名表 = ("凭证兑换", "新增时装", "新增模组")
 新增键 = {"凭证兑换": "凭证", "新增时装": "时装", "新增模组": "模组"}
 周名 = ["一", "二", "三", "四", "五", "六", "日"]
@@ -423,17 +427,46 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
     显示 = list(reversed(记录))   # 倒序：卡池在上、长期在下（沿用原图观感）
     弧度 = 组弧度表()
     名字号 = 15
-    标签们 = [组标签(条目) for 条目 in 显示]
 
-    # 标签相同的连续行归为一个功能块，块内给左列一条色轨、块间加分隔线，
+    def 画合并行(行, 条色, y0, y中, 条高) -> None:
+        """把 N 个常驻条目画在**同一行**里：条铺满全图、按数量斜切等分、每段写名字。
+
+        分隔用**斜线**而不是竖线：甘特区里的竖线是日期网格，竖着切会被读成"某个时间点"，
+        斜切才看得出"这几条是并列的，不是首尾相接"。
+        """
+        x0, x1 = x(0), x(总小时)
+        条 = FancyBboxPatch((x0, y0), x1 - x0, 条高,
+                           boxstyle="round,pad=0,rounding_size=2.5",
+                           facecolor=条色, edgecolor="none", zorder=3)
+        条.set_path_effects([SimplePatchShadow(offset=(0, -3), alpha=0.30), Normal()])
+        ax.add_patch(条)
+
+        段宽 = (x1 - x0) / len(行)
+        斜量 = 条高 * 0.45      # 斜线的水平投影：太立像竖线，太平像斜杠
+        字色 = 主题.对色(条色)
+        for k, 条目 in enumerate(行):
+            段左 = x0 + k * 段宽
+            if k:
+                ax.add_line(Line2D([段左 - 斜量 / 2, 段左 + 斜量 / 2], [y0, y0 + 条高],
+                                   color=主题.更深, linewidth=3.2, alpha=0.78,
+                                   solid_capstyle="round", zorder=4))
+            ax.text(段左 + 段宽 / 2, y中, 展示名(条目.名称), fontsize=条名_字号, color=字色,
+                    ha="center", va="center", zorder=4, clip_path=条, fontweight=条名_字重,
+                    path_effects=粗体(字色, 条名_描边))
+
+    # 行 = 若干条目：铺满全图的常驻条并成一行，其余各自一行（见 `分行`）
+    行们 = 分行(显示, 左边界, 右边界)
+    行标签们 = [组标签(行[0]) for 行 in 行们]
+
+    # 标签相同的连续**行**归为一个功能块，块内给左列一条色轨、块间加分隔线，
     # 这样即使相邻两组的颜色相近，也能一眼看出分组边界
     组们: list[tuple[int, int, str]] = []
     i = 0
-    while i < len(标签们):
+    while i < len(行标签们):
         j = i
-        while j + 1 < len(标签们) and 标签们[j + 1] == 标签们[i]:
+        while j + 1 < len(行标签们) and 行标签们[j + 1] == 行标签们[i]:
             j += 1
-        组们.append((i, j, 标签们[i]))
+        组们.append((i, j, 行标签们[i]))
         i = j + 1
     for 起, 止, 标签 in 组们:
         组色 = 主题.大色块(弧度.get(标签, 0.0))
@@ -469,24 +502,31 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
                            alpha=0.28, edgecolor="none", zorder=1.5))
 
     # 行
-    for i, 条目 in enumerate(显示):
-        名 = 展示名(条目.名称)
-        始, 终 = 条目.开始, 条目.结束
-        条色 = 主题.大色块(弧度.get(组标签(条目), 0.0))
+    for i, 行 in enumerate(行们):
+        代表 = 行[0]
+        条色 = 主题.大色块(弧度.get(组标签(代表), 0.0))
         y顶 = 顶 - i * 甘特行高px
         y底 = y顶 - 甘特行高px
 
         ax.add_line(Line2D([0, 轴宽], [y底, y底], color=主题.分隔, linewidth=1, zorder=2))
         ax.add_patch(Rectangle((0, y底), 7, 甘特行高px, facecolor=条色,
                                edgecolor="none", zorder=3))
+        条高 = 甘特行高px * 0.60
+        y0 = y底 + (甘特行高px - 条高) / 2
+        y中 = y0 + 条高 * 0.5
+
+        if len(行) > 1:            # 常驻合并行：斜切等分
+            画合并行(行, 条色, y0, y中, 条高)
+            continue
+
+        条目 = 代表
+        名 = 展示名(条目.名称)
+        始, 终 = 条目.开始, 条目.结束
         起小时 = max((始 - 左边界).total_seconds() / 3600, 0)
         止小时 = min((终 - 左边界).total_seconds() / 3600, 总小时)
         if 止小时 <= 起小时:
             continue
         x0, x1 = x(起小时), x(止小时)
-        条高 = 甘特行高px * 0.60
-        y0 = y底 + (甘特行高px - 条高) / 2
-        y中 = y0 + 条高 * 0.5
         # 小圆角：dpi 150 下 1 数据单位 = 1 像素，所以 rounding_size 就是像素值；
         # pad=0 是必须的，否则 boxstyle 会把矩形向外撑开
         条 = FancyBboxPatch((x0, y0), x1 - x0, 条高,
