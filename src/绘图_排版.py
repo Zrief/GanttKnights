@@ -15,6 +15,9 @@
   3) 页眉 = 大字粗体标题（无衬线，见 字体.py 的"为什么不用衬线"）+ 右侧带强调竖线的信息块。
   4) 底栏排版由条目数自动搜索：行数最少 → 填得最满 → 格宽最接近理想值。
 
+画布宽度跟随内容（`定图宽()`）：高度按行数堆出，宽 = 总高 × 目标比并夹取，
+内容少就收窄、内容多用满上限——比例始终落在舒服的区间，不随当周活动数漂移。
+
 配色不写死：整套色值由 src.绘图_主题.建主题(背景图) 推导——色相与彩度取自图片，
 明度梯度（深底/面板/文字/强调）是固定规范，于是每张背景图自动得到自己的主体色系，
 事件类型与底栏分区分取同一条强调色阶的不同档位。
@@ -113,11 +116,15 @@ def 粗体(色: str, 粗细: float = 0.9):
 
 
 # —— 画布尺寸（dpi150 下的像素）——
+# 图宽**不是定值**：高度按行数堆出来，内容少时图矮，定宽 2400 会显得太长（实测 6 行甘特
+# + 1 行底栏 = 2400×1036 ≈ 2.32:1）；窄宽定死又会把内容多的周压成方图。所以宽度跟着
+# 内容走：总高 × 目标比，夹在 [图宽最小px, 图宽最大px]，见 定图宽()。
 DPI = 150
-图宽px = 2400
+图宽最大px = 2400
+图宽最小px = 1800
+目标宽高比 = 1.7          # ≈ 16:9 与 3:2 之间
 边距左px = 边距右px = 60
 边距下px = 46
-轴宽px = 图宽px - 边距左px - 边距右px
 
 页眉高px = 96
 页眉间距px = 18
@@ -227,7 +234,8 @@ def 载图标数组(文件名: str) -> np.ndarray | None:
 
 # ============================ 底栏排版搜索 ============================
 
-def 试排(分区: list[tuple[str, list[dict]]], 格宽px: float) -> list[list[tuple]]:
+def 试排(分区: list[tuple[str, list[dict]]], 格宽px: float,
+         轴宽px: float) -> list[list[tuple]]:
     """按像素装箱：区优先整块落位（当前行放不下就整体挪到下一行），
     只有连一行都放不下的超长区才拆开，且先填满当前行的剩余格子再续到下一行。
     返回 行们：每行是 [(区名, 标签, 条目们, 起始px)]。"""
@@ -275,19 +283,20 @@ def 试排(分区: list[tuple[str, list[dict]]], 格宽px: float) -> list[list[t
     return 行们
 
 
-def 行填充率(行: list[tuple], 格宽px: float) -> float:
+def 行填充率(行: list[tuple], 格宽px: float, 轴宽px: float) -> float:
     _, _, 块, 起 = 行[-1]
     return (起 + len(块) * 格宽px) / 轴宽px
 
 
-def 选版面(分区: list[tuple[str, list[dict]]]) -> tuple[list[list[tuple]], int]:
+def 选版面(分区: list[tuple[str, list[dict]]],
+           轴宽px: float) -> tuple[list[list[tuple]], int]:
     """枚举格宽 → 打分选最优：行数最少 > 填得最满 > 格宽最接近理想值"""
     最优 = None
     for 格宽px in range(格宽最小px, 格宽最大px + 1):
-        行们 = 试排(分区, 格宽px)
+        行们 = 试排(分区, 格宽px, 轴宽px)
         if not 行们:
             continue
-        填充 = [行填充率(行, 格宽px) for 行 in 行们]
+        填充 = [行填充率(行, 格宽px, 轴宽px) for 行 in 行们]
         平均, 最差 = sum(填充) / len(填充), min(填充)
         切块数 = sum(len(行) for 行 in 行们) - len(分区)
         分 = (-8.0 * len(行们)                       # 行数越少图越矮
@@ -327,17 +336,38 @@ def 压暗系数(底图: np.ndarray, 深底色: str) -> float:
     return float(np.clip(系数, 0.30, 0.55))
 
 
-def 建分区画布(事件数: int, 行数: int, 主题: 主题, 背景路径: str | Path):
-    """从上到下：页眉、甘特图、行数 行底栏。每段高度按像素给定，
-    再用 0 间距的 GridSpec 精确落位（height_ratios 的一个单位 = 一个像素）"""
-    plt.rcParams["font.size"] = 10
+def 总高计算(事件数: int, 行数: int) -> tuple[list[int], int]:
+    """各段高度比例表与总高（px）。定宽（定图宽）与建画布共用同一份——
+    "图多高"只能有一个出处，两处各算各的迟早又跑出一块底部空白。"""
     甘特高px = 甘特轴带px + max(事件数, 1) * 甘特行高px + 甘特底px
     比例 = [页眉高px, 页眉间距px, 甘特高px, 甘特间距px]
     for i in range(max(行数, 0)):
         if i:
             比例.append(行间距px)
         比例.append(行高px)
-    总高px = sum(比例) + 边距下px
+    return 比例, sum(比例) + 边距下px
+
+
+def 定图宽(事件数: int, 分区: list[tuple[str, list[dict]]]) -> tuple[int, list, int]:
+    """宽度跟着内容走：按最大宽先装箱 → 总高 × 目标比定宽（夹取）→ 按新宽度重装一次。
+
+    装箱是纯计算（`选版面` 不碰 matplotlib），跑两遍开销可忽略。重装后行数可能变，
+    比例会略偏离目标值——带宽够宽，不再迭代第三轮。
+    返回 (图宽px, 底栏行们, 格宽px)，后两个是**最终宽度下**的装箱结果。
+    """
+    行们, 格宽px = 选版面(分区, 图宽最大px - 边距左px - 边距右px)
+    _, 总高px = 总高计算(事件数, len(行们))
+    图宽px = int(max(图宽最小px, min(图宽最大px, round(总高px * 目标宽高比))))
+    if 图宽px != 图宽最大px:
+        行们, 格宽px = 选版面(分区, 图宽px - 边距左px - 边距右px)
+    return 图宽px, 行们, 格宽px
+
+
+def 建分区画布(事件数: int, 行数: int, 主题: 主题, 背景路径: str | Path, 图宽px: int):
+    """从上到下：页眉、甘特图、行数 行底栏。每段高度按像素给定，
+    再用 0 间距的 GridSpec 精确落位（height_ratios 的一个单位 = 一个像素）"""
+    plt.rcParams["font.size"] = 10
+    比例, 总高px = 总高计算(事件数, 行数)
     fig = plt.figure(figsize=(图宽px / DPI, 总高px / DPI), dpi=DPI, facecolor=主题.深底)
     # 背景图铺满整张画布（figimage 垫在所有内容之下），压暗后垫底
     try:
@@ -572,19 +602,27 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         ax.add_line(Line2D([xx, xx], [顶, 轴高], color=轴色,
                            linewidth=3 if 是今天 else 1, zorder=9))
         # 每天一个刻度；只在真的放不下时才跳过（今天永远保留）
+        # 刻度只写日号；月份是锚点不是逐格信息——每月 1 号写 `M月`（顶替 `01`），
+        # 窗口最左一格也标月（页眉没有日期信息，头几格需要一个锚点才知道是几月）。
         # 注：文本宽度按 11 号估，实际绘制用的是 11.5 号（历史遗留，见 docs 记录）
-        字宽 = 文本宽(f"{日:%m/%d}", 11, family=等宽)
+        是锚点 = 日.day == 1 or d == 0
+        刻度 = f"{日.month}月" if 是锚点 else f"{日.day}"
+        字宽 = 文本宽(刻度, 11, family=等宽)
         贴左 = xx + 8 + 字宽 < 轴宽
         左 = xx + 8 if 贴左 else xx - 8 - 字宽
         if 左 < 上次右 + 6 and not 是今天:
             continue
         上次右 = 左 + 字宽
-        轴字色 = 主题.今天 if 是今天 else 主题.主文
-        ax.text(xx + (8 if 贴左 else -8), 顶 + 42, f"{日:%m/%d}", fontsize=11.5,
+        # 三档层级：今天（强调色+粗）> 锚点（主文+粗）> 日号（次文、常规）。
+        # 日号退到次文色——"密"的体量来自 22 个主文色标签；锚点加粗才看得出结构。
+        # 今天恰逢锚点时强调色优先，两条规则都指向加粗，天然兼容。
+        轴字色 = 主题.今天 if 是今天 else (主题.主文 if 是锚点 else 主题.次文)
+        加重 = 是今天 or 是锚点
+        ax.text(xx + (8 if 贴左 else -8), 顶 + 42, 刻度, fontsize=11.5,
                 color=轴字色, family=等宽,
                 ha="left" if 贴左 else "right", va="center",
-                zorder=10, fontweight=粗字重 if 是今天 else "normal",
-                path_effects=粗体(轴字色, 0.7) if 是今天 else None)
+                zorder=10, fontweight=粗字重 if 加重 else "normal",
+                path_effects=粗体(轴字色, 0.7) if 加重 else None)
         ax.text(xx + (8 if 贴左 else -8), 顶 + 17, f"周{周名[日.weekday()]}",
                 fontsize=10, color=主题.今天 if 是今天 else 主题.次文,
                 ha="left" if 贴左 else "right", va="center", zorder=10)
@@ -711,14 +749,14 @@ def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]
               主题: 主题, 左边界: datetime, 右边界: datetime,
               背景路径: str | Path, 现在: datetime,
               标题: str = 图标题) -> str:
-    """搜索底栏版面 → 建画布 → 画页眉/甘特/底栏 → 存图；返回版面概况"""
+    """定宽（两遍装箱）→ 建画布 → 画页眉/甘特/底栏 → 存图；返回版面概况"""
     _确保字体就绪()
     有效 = [(区名, 条目们) for 区名, 条目们 in 分区 if 条目们]
-    底栏行们, 格宽px = 选版面(有效)
     # ⚠️ 两个"行"不是一回事：`底栏行们` 是底栏的卡片行，甘特的行数得按 `分行()` 算——
     # 铺满全图的常驻条会并成一行，还用 len(记录) 就会在甘特底下多留一块空白（2026-09-24 修）。
     甘特行数 = len(分行(记录, 左边界, 右边界))
-    fig, gs, ax_页眉, ax_chart = 建分区画布(甘特行数, len(底栏行们), 主题, 背景路径)
+    图宽px, 底栏行们, 格宽px = 定图宽(甘特行数, 有效)
+    fig, gs, ax_页眉, ax_chart = 建分区画布(甘特行数, len(底栏行们), 主题, 背景路径, 图宽px)
     填页眉(ax_页眉, fig, 主题, 现在, 标题)
     填甘特区(ax_chart, fig, 记录, 主题, 左边界, 右边界, 现在)
     for r, 行 in enumerate(底栏行们):
@@ -730,7 +768,7 @@ def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]
     finally:
         plt.close(fig)
     if not 底栏行们:
-        return "无底栏条目"
+        return f"图宽{图宽px}px / 无底栏条目"
     概况 = " + ".join(" | ".join(f"{标签}×{len(块)}" for _, 标签, 块, _ in 行)
                      for 行 in 底栏行们)
-    return f"{len(底栏行们)} 行 / 格宽{格宽px:.0f}px / {概况}"
+    return f"图宽{图宽px}px / {len(底栏行们)} 行 / 格宽{格宽px:.0f}px / {概况}"
