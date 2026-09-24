@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from . import 长期活动
 from .数据保护 import 校验写回
 
 logger = logging.getLogger("src.汇总")
@@ -83,16 +84,32 @@ def _提取干员(名称: str) -> str:
     return ""
 
 
+def _身份键(名称: str, 类型: int) -> str:
+    """合并与去重共用的**身份**键：卡池用干员名，长期剥掉开头的 `【玩法】` 前缀，其余用原始名。
+
+    长期条目的前缀（玩法名）在数据源里换过写法——公告简写 `【剿灭】`、官方名
+    `【剿灭作战】`、还有裸名无前缀（`长期活动.py` 的"两副面孔"）——拿原始名当键，
+    改名前后的两行就互相覆盖不到，会在 CSV 里**永久并存**、越抓越多
+    （2026-09-24 实测：`默祷圣祠`×2、`重启锚点`×2，bootstrap 也清不掉——
+    它们 2027 年才结束，永远不过期）。前缀语义归 `长期活动` 唯一定义管，
+    这里只认"类型 99 的开头【…】是玩法前缀"，不另起一张表。
+    """
+    if 类型 == 0:
+        干员 = _提取干员(名称)
+        if 干员:
+            return 干员
+    if 类型 == 长期活动.类型值 and 名称.startswith("【") and "】" in 名称:
+        return 名称.split("】", 1)[1]
+    return 名称
+
+
 def 去重排序(活动列表: list[dict]) -> list[dict]:
-    """按干员名+时间去重（卡池），按开始时间排序"""
+    """按身份键+时间去重，按开始时间排序"""
     seen = set()
     seen登录窗口 = set()
     去重后 = []
     for a in 活动列表:
-        if a["类型"] == 0:
-            干员 = _提取干员(a["名称"])
-            key = (干员, a["开始时间"], a["结束时间"], a["类型"]) if 干员 else (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
-        elif a["类型"] == 2:
+        if a["类型"] == 2:
             # 登录/签到活动：公告里的签到板块常不带本名（如月行水上的
             # 签到其实就是此夜同行），按时间窗去重，保留先出现的 ask 官方名
             key = ("登录", a["开始时间"], a["结束时间"])
@@ -101,8 +118,7 @@ def 去重排序(活动列表: list[dict]) -> list[dict]:
             seen登录窗口.add(key)
             去重后.append(a)
             continue
-        else:
-            key = (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
+        key = (_身份键(a["名称"], a["类型"]), a["开始时间"], a["结束时间"], a["类型"])
         if key not in seen:
             seen.add(key)
             去重后.append(a)
@@ -111,14 +127,6 @@ def 去重排序(活动列表: list[dict]) -> list[dict]:
 
 
 # ---------- 增量存储 ----------
-
-def _卡池合并key(条目: dict) -> str:
-    """卡池统一键名：优先用干员名，否则用名称"""
-    if 条目["类型"] == 0:
-        干员 = _提取干员(条目["名称"])
-        if 干员:
-            return 干员
-    return 条目["名称"]
 
 
 def 合并保存CSV(
@@ -147,7 +155,7 @@ def 合并保存CSV(
                 if not row.get("名称", "").strip():
                     continue
                 类型 = int(row["类型"])
-                键名 = 干员名 if (干员名 := _提取干员(row["名称"])) and 类型 == 0 else row["名称"]
+                键名 = _身份键(row["名称"], 类型)
                 已有[键名] = {
                     "名称": row["名称"],
                     "开始时间": row["开始时间"],
@@ -167,7 +175,7 @@ def 合并保存CSV(
 
     本次: dict[str, tuple[str, str, str, int]] = {}
     for a in 新活动列表:
-        键 = _卡池合并key(a)
+        键 = _身份键(a["名称"], a["类型"])
         本次[键] = (a["名称"], a["开始时间"], a["结束时间"], a["类型"])
         已有[键] = {
             "名称": a["名称"],
