@@ -1,10 +1,11 @@
-"""配置契约：`_conf_schema.json` ↔ 代码默认值/夹取范围 ↔ README 字段说明。
+"""配置契约：`_conf_schema.json` ↔ 代码默认值/夹取范围。
 
-这是 「测试与验证」 列的"测试 2 + 测试 5"：**配置即契约**。三份东西必须同一口径——
+这是 「测试与验证」 列的"测试 2 + 测试 5"：**配置即契约**。两边必须同一口径——
 - schema 的默认值 == `运行配置` 的默认值；
-- schema 的 minimum/maximum == `插件/配置.py` 的夹取范围；
-- README 的「配置项」一节里能查到**每一个**字段（照 palette 的
-  `test_settings_static.py` 思路：不 import astrbot，纯 stdlib 读文件比对）。
+- schema 的 minimum/maximum == `插件/配置.py` 的夹取范围。
+
+（曾是三边契约，含"README 配置项表记录每个字段"一腿；2026-09-24 删掉——
+设置页每项自带 description（`test_schema_形状` 保证），README 重复一份只是维护负担。）
 """
 
 from __future__ import annotations
@@ -78,14 +79,6 @@ def test_schema_数值范围等于代码夹取范围(schema, 范围, 字段映�
             assert (项.get("minimum"), 项.get("maximum")) == 范围[键], f"{节}.{键}"
         else:
             assert "minimum" not in 项 and "maximum" not in 项, f"{节}.{键} 有范围但代码没夹取"
-
-
-def test_README_记录了每个配置字段(schema, 字段映射):
-    """README 的「配置项」一节必须能查到每个字段（文档即契约）。"""
-    readme = (仓库根 / "README.md").read_text(encoding="utf-8")
-    assert "## 配置项" in readme, "README 里没有「配置项」一节"
-    缺 = [f"{节}.{键}" for 节, 键 in 字段映射 if f"`{节}.{键}`" not in readme]
-    assert not 缺, f"README 未记录：{缺}"
 
 
 def test_越界与坏值都被夹住(插件模块):

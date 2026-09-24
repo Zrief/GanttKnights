@@ -67,7 +67,6 @@ python cli.py --bootstrap --force    # 首次建立数据：回溯已结束活�
 提示「首次出图要抓取数据」时是十几秒：要拉活动时间、卡池与各活动的公告，还要缓存底栏头像图标。
 之后每天的第一张图会重新抓一次数据（几秒），当天后续请求直接渲染。
 
-
 **到点了没收到推送？**
 先发 `/甘特图状态` 看「上次」那行：失败会写在这里，且**下一次到点会自动再试**（成功的当天不会重发）。
 如果是 QQ 官方机器人，多半是上面那条「机器人主动在群聊内发言」没开。
@@ -87,7 +86,7 @@ Noto CJK）」三层候选，缺字体不会出豆腐块。要跨机器逐像素
 （下载地址见 `src/字体.py` 的说明）。
 
 **怎么改标题、时间窗、底栏面板？**
-都在插件配置页里，见下面的「配置项」。改完不用重启，下一次出图就生效。
+都在插件配置页里（每项自带说明），改完不用重启，下一次出图就生效。
 
 **数据会天天变吗？**
 每天第一次出图时重新抓取：新活动加进来、过期的删掉、时间改动更新。数据缓存在
@@ -106,31 +105,9 @@ Noto CJK）」三层候选，缺字体不会出豆腐块。要跨机器逐像素
 
 ## 配置项
 
-在 AstrBot 的插件配置页里改；下表与 `_conf_schema.json` 一一对应。
-
-| 键 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `render.title` | string | 近期活动一览 | 图片主标题 |
-| `render.left_offset_days` | int | 3（0~30） | 时间窗左侧回溯天数，0 = 只看今天起 |
-| `render.right_offset_days` | int | 22（7~30） | 时间窗右侧前瞻天数；右边界会对齐到当周周日 |
-| `render.background_file` | string | （空） | 指定用哪张背景（文件名或绝对路径）；留空则每天按日期自动取一张 |
-| `render.background_dir` | string | （空） | 背景图目录；留空 = 插件自带的 `背景图/`。建议把自己的图放到 `data/plugin_data/astrbot_plugin_ganttknights/` 再指过来 |
-| `panels.voucher` | bool | 开 | 底栏「凭证兑换」面板 |
-| `panels.outfit` | bool | 开 | 底栏「新增时装」面板 |
-| `panels.module` | bool | 开 | 底栏「新增模组」面板 |
-| `data.auto_refresh_daily` | bool | 开 | 每天首次出图时自动更新数据；关掉后只出图不爬取 |
-| `notify.enabled` | bool | 开 | 节点提醒总开关；关掉后一个字的提醒都不发，推送只发图 |
-| `notify.end_enabled` | bool | 开 | 是否提醒「活动即将结束」 |
-| `notify.start_enabled` | bool | 开 | 是否提醒「活动开启」 |
-| `notify.end_offsets` | list | -3, -1 | **距结束**几天时提醒：-3 = 结束前 3 天、-1 = 最后一天、0 = 结束当天；留空 = 这类不提醒 |
-| `notify.start_offsets` | list | 0 | **距开始**几天时提醒：0 = 开启当天、-1 = 前一天；留空 = 这类不提醒 |
-| `notify.require_reminder` | bool | 关 | 只在有节点提醒时推送：当天没有任何节点命中就整次静默（连图都不发）。注意它和 `notify.enabled` 是一对——总开关关着就永远没有提醒 |
-| `push.enabled` | bool | 关 | 开启每日推送 |
-| `push.time` | string | 08:00 | 推送时刻（HH:MM，运行 AstrBot 那台机器的本地时间） |
-| `push.targets` | list | （空） | 推送目标会话；用 `/订阅甘特图` 加入、`/退订甘特图` 移出，也可以直接在这里增删 |
-| `push.text_template` | string | `{提醒}` | 有提醒那天附在图下面的文字；可用 `{提醒}`（提醒原文）、`{日期}`、`{条目数}`，留空 = 只发图 |
-
-改动任何一项，下一次出图就按新值渲染（数值越界会被后端夹到范围内）。
+全部配置都在 AstrBot 的插件配置页里改（标题、时间窗、背景、底栏面板、节点提醒、
+每日推送等，每项自带说明）。改完不用重启，下一次出图就按新值渲染；
+数值越界会被后端夹回允许范围。
 
 ## 许可与素材来源
 
@@ -143,47 +120,14 @@ Noto CJK）」三层候选，缺字体不会出豆腐块。要跨机器逐像素
 
 ## 致谢
 
-写插件时读了这些项目的代码/文档（AstrBot 的开发原则也要求写清灵感来源并附链接）：
+AstrBot 的开发原则要求写清灵感来源。本项目实际借鉴过：
 
-**有实际借鉴**
-
-| 项目 | 在我们这里起了什么作用 |
-|---|---|
-| [astrbot_plugin_ark_calendar](https://github.com/zhewang448/astrbot_plugin_ark_calendar)（罗德岛行动终端） | 插件骨架：`Star` 子类 + 双参构造、把指令元数据收进 `CommandSpec`、生命周期顺序（`initialize` / `terminate`）。它还有一份意外贡献：依赖锁版本与宿主冲突的经历，让我们定下「`requirements.txt` 只写裸依赖名」这条规矩 |
-| [astrbot_plugin_palette](https://github.com/Sisyphbaous-DT-Project/astrbot_plugin_palette) | 「配置即契约」的测试思路（schema / 代码默认值 / 文档三边一致）。它也帮我们划清了边界：注入 Dashboard `index.html`、改写宿主 `localStorage`、把 1845 行 JS 内嵌在 Python f-string 里这些做法，我们都没有采用（理由见 [`docs/插件化.md`](./docs/插件化.md) 的「明确不做」） |
-| [MaaAssistantArknights](https://github.com/MaaAssistantArknights/MaaAssistantArknights) | [`docs/配色规范.md`](./docs/配色规范.md) 里「莫奈取色」的实现参考（`ColorExtractorHelper.cs` / `MonetPaletteHelper.cs`）：色相从背景图取、饱和度按角色固定 |
-
-**同类产品（对照插件形状与数据做法）**
-
-| 项目 | 作用 |
-|---|---|
-| [astrbot_plugin_skland](https://github.com/Azincc/astrbot_plugin_skland)（森空岛签到） | 明日方舟系插件的依赖清单与调度写法对照 |
-| [astrbot_plugin_mrfzccl](https://github.com/Li-shi-ling/astrbot_plugin_mrfzccl)（明日方舟猜猜乐） | 同类插件怎么在导入期就直接 `import PIL / numpy / aiohttp` 的样本 |
-| [astrbot_plugin_maa](https://github.com/Hakuin123/astrbot_plugin_maa)（MAA 远程控制） | 同类插件的最小依赖写法；它的 README 用相对路径图片（`img/*.jpg`），是「AstrBot 插件页看不见图」的样本之一 |
-| [astrbot_plugin_endfield](https://github.com/Entropy-Increase-Team/astrbot_plugin_endfield)（终末地协议终端） | 同类游戏数据终端的功能形态与 `requirements`（httpx / jinja2 / playwright）对照 |
-
-**为两件事做的生态抽样**（「依赖到底该怎么装」和「README 图片怎么写」）
-
-| 项目 | 它告诉了我们什么 |
-|---|---|
-| [astrbot_plugin_code_renderer](https://github.com/Xbodwf/astrbot_plugin_code_renderer) | 导入期就 `import PIL / playwright`；`requirements.txt` 写 Pillow / Pygments / playwright |
-| [astrbot_plugin_comfyui](https://github.com/cjxzdzh/astrbot_plugin_comfyui) | 同样的形状，并且源码里有 `ImportError` 兜底 |
-| [astrbot_plugin_grok_suite](https://github.com/muqing-kg/astrbot_plugin_grok_suite) | 同上（导入期 `import aiohttp`） |
-| [astrbot_plugin_fortnue](https://github.com/Xbodwf/astrbot_plugin_fortnue) | 抽样里**唯一**的懒加载样本（PIL 在函数体里 import） |
-| [astrbot_plugin_proactive_chat](https://github.com/DBJD-CR/astrbot_plugin_proactive_chat) | 有 `requirements.txt` 但代码延迟导入；README 用相对路径 SVG |
-| [astrbot_plugin_riddlegame](https://github.com/R1ddle1337/astrbot_plugin_riddlegame) | 只依赖宿主自带的库，代码里不 import 重库 |
-| [astrbot_plugin_vocabcard](https://github.com/itismygo/astrbot_plugin_vocabcard) | `requirements.txt` 里有 playwright 但导入期不 import；README 用相对路径 `example.png` |
-| [astrbot_plugin_daily_card](https://github.com/zhangkai542322/astrbot_plugin_daily_card) | **没有 `requirements.txt`**：直接用宿主自带的 PIL / aiohttp |
-| [astrbot_plugin_psychological](https://github.com/Darkness218/astrbot_plugin_psychological) | 同上（无 `requirements.txt`，用宿主 aiohttp） |
-| [astrbot_plugin_timeprogress](https://github.com/itismygo/astrbot_plugin_timeprogress) | 无 `requirements.txt`、导入期 `import playwright`；渲染失败时 log 一句 `pip install playwright && playwright install chromium` —— 「依赖装不上就给用户一句话」这个做法我们是照着它做的 |
-| [astrbot_plugin_pic_toolbox](https://github.com/lirundong093-glitch/astrbot_plugin_pic_toolbox) | 导入期 `import PIL`、运行期才 `import requests`（同仓库里两种时机都有） |
-| [astrbot_plugin_response2image](https://github.com/FloranceYeh/astrbot_plugin_response2image) | 抽样样本之一；它仓库里的 `main.py` 带 UTF-8 BOM 解析失败 —— 顺带确认了我们自己也要清 BOM |
-
-> 统计口径：这 12 个 + 上面 4 个同类产品 + 主要参考共 19 个仓库，看的是各自 `main.py` 与
-> `requirements.txt`。结论是**「写 `requirements.txt` + 导入期 import 依赖」是生态主流**（13 个可解析样本里 9 个），
-> 所以本插件也把 `import matplotlib` 放在导入期（缺依赖时宿主会自动装好再重试，见
-> [`docs/插件化.md`](./docs/插件化.md) 的「装得上、上得了架」）。
-> 另外统计了官方市场全部 1332 条记录，用于决定 `tags` / `support_platforms` 怎么写。
+- [astrbot_plugin_ark_calendar](https://github.com/zhewang448/astrbot_plugin_ark_calendar)（罗德岛行动终端）：插件骨架
+  （`Star` 子类 + 双参构造、指令元数据收进 `CommandSpec`、生命周期顺序）；以及「`requirements.txt` 只写裸依赖名」这条规矩的由来。
+- [astrbot_plugin_palette](https://github.com/Sisyphbaous-DT-Project/astrbot_plugin_palette)：「配置即契约」的测试思路
+  （schema 与代码默认值两边一致）。
+- [MaaAssistantArknights](https://github.com/MaaAssistantArknights/MaaAssistantArknights)：[`docs/配色规范.md`](./docs/配色规范.md)
+  里「莫奈取色」的实现参考（色相从背景图取、饱和度按角色固定）。
 
 感谢 AstrBot 与以上各插件的作者。
 
