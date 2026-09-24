@@ -27,7 +27,6 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -49,8 +48,7 @@ from .绘图_颜色 import set_alpha_channel
 from .绘图_主题 import 主题
 from .字体 import 注册字体, 字体指纹
 from .提醒文案 import 展示名
-
-logger = logging.getLogger(__name__)
+from .日志 import logger
 
 # —— 文案（颜色一律由 建主题(背景图) 推导，这里不写死任何色值）——
 图标题 = "近期活动一览"

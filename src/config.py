@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -166,9 +165,15 @@ class Settings:
 settings = Settings()
 
 
-def setup_logging(level: int = logging.INFO) -> None:
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+def setup_logging(level: str = "INFO") -> None:
+    """CLI 的日志开关：全仓 logger 出自 `src.日志`（上架合规的单点 shim），这里只调级别。
+
+    裸机后端是极简 print 实现、不挂 stdlib handler——依赖库（httpx 等）的 INFO
+    日志天然静默，无需再降噪。AstrBot 运行时后端是宿主自己的 logger，级别归宿主管，
+    本函数对它不起作用（也不该起作用）。
+    """
+    from .日志 import logger
+
+    设 = getattr(logger, "设级别", None)
+    if 设:
+        设(level)

@@ -8,11 +8,10 @@ href/title/图标 src 逐属性独立提取，不依赖标签内属性顺序。
 
 from __future__ import annotations
 
-import logging
 import re
 from urllib.parse import urljoin
 
-logger = logging.getLogger("src.解析")
+from .日志 import logger
 
 PRTS_BASE = "https://prts.wiki"
 
@@ -76,7 +75,7 @@ def 解析新增内容(首页html: str) -> dict[str, list[dict]]:
             })
 
         结果[类型] = 条目们
-        logger.info("  首页新增%s: %d 条", 类型, len(条目们))
+        logger.debug("  首页新增%s: %d 条", 类型, len(条目们))
     return 结果
 
 

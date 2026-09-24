@@ -11,14 +11,12 @@ wiki 手填的 SMW 属性会抄错（实测 `稳态测定` 的窗口被抄成月
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timedelta
 
 from . import 长期活动
 from .获取_prts import 公告页标题, 获取页面wikitext
 from .解析_公告 import 板块, 板块条目, 公告定位, 关卡条目, 页父名, 解析活动信息, 提醒保全, 抽板块
-
-logger = logging.getLogger("src.解析")
+from .日志 import logger
 
 # PRTS 的"活动开始/结束时间"存的是 UTC，比国服早 8 小时；
 # cn 后缀属性是国服时间，但只有开始时间有，结束时间一律自己 +8h 换算
@@ -119,7 +117,7 @@ def 认领与生成(成员们: list[dict], 页们: dict[str, list[板块]]) -> l
         if i not in 认领 and b.窗口:
             认领[i] = m
             已领.add(id(m))
-            logger.info("  %s ← 板块「%s」（%s认领）", m["显示名"], b.标题, 方式)
+            logger.debug("  %s ← 板块「%s」（%s认领）", m["显示名"], b.标题, 方式)
             return True
         return False
 
@@ -150,11 +148,11 @@ def 认领与生成(成员们: list[dict], 页们: dict[str, list[板块]]) -> l
         if id(m) in 已领:
             continue
         if m["已结束"]:
-            logger.info("  %s → 未认领（已结束，不添加）", m["显示名"])
+            logger.debug("  %s → 未认领（已结束，不添加）", m["显示名"])
         else:
             结果.append({"名称": m["显示名"], "开始时间": m["开始"], "结束时间": m["结束"],
                         "类型": m["类型"], "_parent": ""})
-            logger.info("  %s → ask 时间（类型 %s，公告未认领）", m["显示名"], m["类型"])
+            logger.debug("  %s → ask 时间（类型 %s，公告未认领）", m["显示名"], m["类型"])
     return 结果
 
 

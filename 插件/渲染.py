@@ -24,7 +24,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import zlib
 from dataclasses import fields, replace
@@ -35,8 +34,7 @@ from ..src.config import Settings, settings as 内核设置
 from ..src.流水线 import 今天写过, 更新增预告, 更新数据, render_once
 from ..src.流水线 import 渲染结果
 from .配置 import 运行配置
-
-logger = logging.getLogger("ganttknights")
+from ..src.日志 import logger
 
 魔数长度 = 8
 _JPEG魔数 = b"\xff\xd8\xff"

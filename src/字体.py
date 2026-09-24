@@ -37,7 +37,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,8 +44,7 @@ import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 
 from .config import settings
-
-logger = logging.getLogger(__name__)
+from .日志 import logger
 
 
 # 字体目录取自 settings（默认 ROOT_DIR/字体，可用 GK_FONT_DIR 或构造参数覆盖）。
@@ -228,7 +226,7 @@ def 注册字体(强制: bool = False) -> 字体方案:
     if _方案 is not None and not 强制 and 指纹 == _方案指纹:
         return _方案
     if _方案 is not None:
-        logger.info("字体来源发生变化，重新解析字体")
+        logger.debug("字体来源发生变化，重新解析字体")
 
     字体目录 = 取字体目录()
     随包可用 = [名 for 名 in 字体表 if (字体目录 / 名).exists()]
@@ -264,7 +262,7 @@ def 注册字体(强制: bool = False) -> 字体方案:
     plt.rcParams["axes.unicode_minus"] = False
     _方案指纹 = 指纹
 
-    logger.info(
+    logger.debug(
         "字体来源 %s：正文 %s（%s）｜等宽 %s（%s）｜真粗体 %s",
         _方案.来源, _方案.无衬线族, Path(_方案.正文文件).name if _方案.正文文件 else "?",
         _方案.等宽族, Path(_方案.等宽文件).name if _方案.等宽文件 else "?",

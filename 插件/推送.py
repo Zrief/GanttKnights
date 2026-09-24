@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -48,7 +47,7 @@ from .配置 import 运行配置
 if TYPE_CHECKING:               # 只给注解用：运行时不建立到渲染模块的依赖
     from .渲染 import 渲染服务
 
-logger = logging.getLogger("ganttknights")
+from ..src.日志 import logger
 
 # ---------- 推送目标的增删（纯函数：不碰配置、也不碰宿主的保存接口）----------
 
@@ -288,7 +287,7 @@ class 推送服务:
         try:
             await self.推一次(运行配置=self.配置读取())
         except asyncio.CancelledError:
-            logger.info("每日推送任务被取消（插件卸载/重载）")
+            logger.debug("每日推送任务被取消（插件卸载/重载）")
             raise
         except Exception:
             logger.exception("每日推送失败")
@@ -322,7 +321,7 @@ class 推送服务:
             #（想省渲染得把提醒计算挪到绘图之前，见 tmp/规格_无提醒静默.md §1）。
             if 运行配置.只在有提醒时推送 and not getattr(结果, "有提醒", False):
                 self.状态.记结果(0, 0, 无提醒说明)
-                logger.info("每日推送：今天没有节点提醒，整次静默")
+                logger.debug("每日推送：今天没有节点提醒，整次静默")
                 return 无提醒说明
 
             # 渲染只做一次，投递循环在渲染锁之外

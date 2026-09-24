@@ -28,7 +28,6 @@ matplotlib 相关一律在 `render_once()` 内部按需导入——而 render_on
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -40,8 +39,7 @@ from .汇总_活动 import 合并保存CSV, 合并商店, 去重排序
 from .解析_API活动 import API转活动列表
 from .生成_提醒 import 开始偏移默认, 结束偏移默认, 生成提醒
 from .筛选_活动 import preprocess_data
-
-logger = logging.getLogger("ganttknights")
+from .日志 import logger
 
 _DEFAULT_TITLE = "近期活动一览"
 _WARN_SECTIONS = ("凭证兑换", "新增时装", "新增模组")
@@ -138,7 +136,7 @@ def _清理图标缓存(缓存目录: Path, 引用名们: set[str]) -> None:
             f.unlink()
             删了 += 1
     if 删了:
-        logger.info("  清理孤儿图标 %d 个", 删了)
+        logger.debug("  清理孤儿图标 %d 个", 删了)
 
 
 def 更新增预告(现在时间: datetime, 现在字符串: str) -> dict:
@@ -170,7 +168,7 @@ def 更新增预告(现在时间: datetime, 现在字符串: str) -> dict:
     _写新增预告(新增, 现在字符串)
     引用名们 = {t["图标文件名"] for ts in 新增.values() if isinstance(ts, list) for t in ts}
     _清理图标缓存(缓存目录, 引用名们)
-    logger.info(
+    logger.debug(
         "新增预告: " + " / ".join(f"{键} {len(新增[键])}" for 键 in 预告键) + "，图标缓存于 %s",
         缓存目录,
     )
@@ -354,7 +352,7 @@ def render_once(
             print(提醒)
             print("=" * 54)
         Path(settings.warning_path).write_text(提醒, encoding="utf-8")
-        logger.info("今日提醒已保存至 %s", settings.warning_path)
+        logger.debug("今日提醒已保存至 %s", settings.warning_path)
     except Exception:
         logger.exception("生成提醒失败")
 

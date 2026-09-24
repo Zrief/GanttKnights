@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import csv
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import 长期活动
 from .数据保护 import 校验写回
-
-logger = logging.getLogger("src.汇总")
+from .日志 import logger
 
 # store 里过期超过这个天数的条目自动清理
 过期保留天数 = 7
@@ -189,7 +187,7 @@ def 合并保存CSV(
     所有 = [r for r in 已有.values() if r["结束时间"] >= 清理线]
     删了 = len(已有) - len(所有)
     if 删了:
-        logger.info("  清理过期条目 %d 条（结束时间早于 %s）", 删了, 清理线)
+        logger.debug("  清理过期条目 %d 条（结束时间早于 %s）", 删了, 清理线)
 
     # —— 差异：这次抓取相对原有内容改了什么 ——
     # 只算**能留下来**的行：抓取源里总会带回一堆早已结束的条目（卡池一览尤其多），
@@ -222,6 +220,6 @@ def 合并保存CSV(
 
     差异 = 合并差异(新增=新增, 改动=改动, 过期清理=清理了原有的, 原有条数=原有条数)
     if 差异.有变化:
-        logger.info("  本次合并：新增 %d / 改动 %d / 过期清理 %d",
+        logger.debug("  本次合并：新增 %d / 改动 %d / 过期清理 %d",
                     len(新增), len(改动), 清理了原有的)
     return 差异

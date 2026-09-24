@@ -8,14 +8,12 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
 
 from . import 长期活动
-
-logger = logging.getLogger("src.解析")
+from .日志 import logger
 
 # ---------- 正则 ----------
 

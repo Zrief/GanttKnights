@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -29,8 +28,7 @@ from src.流水线 import (
     渲染结果,
     render_once,
 )
-
-logger = logging.getLogger("ganttknights")
+from src.日志 import logger
 
 
 def main(force: bool = False, bootstrap: bool = False, 现在时间: datetime | None = None) -> 渲染结果:

@@ -112,10 +112,10 @@ class GanttKnightsPlugin(Star):
         """只建目录、读一次配置、武装定时任务——爬取与渲染都推迟到真正出图时。"""
         self.data_dir.mkdir(parents=True, exist_ok=True)
         logger.info(
-            "明日方舟甘特图已加载：插件目录 %s｜数据目录 %s｜matplotlib 缓存 %s",
-            self.plugin_dir, self.data_dir, self.mplconfig_dir,
+            f"明日方舟甘特图已加载：插件目录 {self.plugin_dir}｜数据目录 {self.data_dir}"
+            f"｜matplotlib 缓存 {self.mplconfig_dir}"
         )
-        logger.info("每日推送：%s", self.推送.确保任务(self.运行配置()))
+        logger.info(f"每日推送：{self.推送.确保任务(self.运行配置())}")
 
     async def terminate(self) -> None:
         """插件禁用/重载：关停调度器。
@@ -171,8 +171,8 @@ class GanttKnightsPlugin(Star):
 
         # 按新的目标列表重新武装（幂等且便宜）；否则要等下一次指令才会带上新目标
         self.推送.确保任务(self.运行配置())
-        logger.info("推送目标已%s：%s（现共 %d 个会话）",
-                    "加入" if 订阅 else "移出", unified_msg_origin, len(新的))
+        logger.info(f"推送目标已{'加入' if 订阅 else '移出'}：{unified_msg_origin}"
+                    f"（现共 {len(新的)} 个会话）")
         if not 订阅:
             return 文案.退订成功
         if self.运行配置().推送开关:

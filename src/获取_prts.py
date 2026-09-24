@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import httpx
 
-logger = logging.getLogger("src.网络")
+from .日志 import logger
 
 PRTS_API = "https://prts.wiki/api.php"
 PRTS_HOME = "https://prts.wiki/"
@@ -15,10 +14,8 @@ PRTS_HOME = "https://prts.wiki/"
 CLIENT = httpx.Client(timeout=30, follow_redirects=True)
 """进程级连接池：导入期建一次，之后所有请求复用它（httpx.Client 是线程安全的）。"""
 
-# ⚠️ 这是内核里唯一动**全局**日志的地方，是有意为之，别当成越界"清理"掉：
-# httpx 每个请求打两行 INFO，而 AstrBot 把 root logger 开在 INFO——一次出图要发几十个请求，
-# 不压下去会把宿主日志淹掉。这里只设 httpx 自己那个 logger 的级别，不碰其它 logger。
-logging.getLogger("httpx").setLevel(logging.WARNING)
+# httpx 的 INFO 降噪已挪到 `src/日志.py`（全仓唯一碰 logging 的地方，随 shim 的
+# AstrBot 分支生效；裸机分支没有 stdlib handler，httpx 天然静默，无需降噪）。
 
 _RETRYABLE = (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ReadError)
 
@@ -126,5 +123,5 @@ def 下载图片(url: str, 目标路径: str | Path) -> bool:
     if resp is None:
         return False
     目标.write_bytes(resp.content)
-    logger.info("  已缓存图片: %s", 目标.name)
+    logger.debug("  已缓存图片: %s", 目标.name)
     return True

@@ -27,7 +27,6 @@
 
 from __future__ import annotations
 
-import logging
 import math
 from dataclasses import dataclass
 
@@ -35,8 +34,7 @@ import numpy as np
 from PIL import Image as PILimage
 
 from .绘图_颜色 import _oklab_to_srgb, _srgb_to_oklab
-
-logger = logging.getLogger(__name__)
+from .日志 import logger
 
 缺省色相 = 205.0
 分桶步长 = 16               # RGB 每 16 一档分桶（MAA 的 BucketSize）

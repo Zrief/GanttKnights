@@ -29,7 +29,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -37,8 +36,7 @@ from pathlib import Path
 
 from .汇总_活动 import 合并差异
 from .提醒文案 import 展示名
-
-logger = logging.getLogger("ganttknights")
+from .日志 import logger
 
 文件名 = "最近数据变化.json"
 最大列名数 = 3
@@ -183,5 +181,5 @@ def 记下并取(路径: Path | str, 差异: 合并差异, 今天: str) -> 数�
     except OSError:
         logger.exception("数据变化记录写不进去（不影响出图）：%s", 路径)
     if 变化.文本():
-        logger.info("数据日差 %s", 变化.文本())
+        logger.debug("数据日差 %s", 变化.文本())
     return 变化

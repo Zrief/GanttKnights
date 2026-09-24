@@ -8,12 +8,10 @@
 
 from __future__ import annotations
 
-import logging
 import re
 
 from .获取_prts import PRTS_API, 请求
-
-logger = logging.getLogger(__name__)
+from .日志 import logger
 
 # 分区标题关键词 → 名称前缀 → 是否带序号列 → 左栏用的子类型
 #
@@ -60,9 +58,9 @@ def 解析卡池wikitext(wikitext: str) -> list[dict]:
             logger.warning("卡池一览未找到分区: %s", 关键词)
             continue
         条目 = _解析分区表格(区文本, 前缀, 带序号, 子类型)
-        logger.info("  %s: %d 条", 关键词, len(条目))
+        logger.debug("  %s: %d 条", 关键词, len(条目))
         结果.extend(条目)
-    logger.info("解析卡池一览: %d 条", len(结果))
+    logger.debug("解析卡池一览: %d 条", len(结果))
     return 结果
 
 

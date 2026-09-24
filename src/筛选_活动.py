@@ -15,13 +15,11 @@
 from __future__ import annotations
 
 import csv
-import logging
 from datetime import datetime, timedelta
 
 from .config import settings
 from .活动 import 活动, 排序键
-
-logger = logging.getLogger(__name__)
+from .日志 import logger
 
 # 时间列接受的格式：主格式来自本项目自己写的 CSV，其余为容错
 时间格式们 = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d")
