@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from . import 长期活动
@@ -35,6 +35,13 @@ from .日志 import logger
 )
 独立活动正则 = re.compile(r"[「](.+?锦标.*?|.+?活动.*?)[」]")
 
+甄选名单正则 = re.compile(r"★★★★★★（[^）]*）[：:]\s*([^{}\n]+)")
+"""甄选池板块里的六星名单行：`★★★★★★（6★出率：2%）：Mon3tr / 圣聆初雪 / …`。
+
+分隔符公告里换过写法（` / `、`/`，夏活那期还用过反斜杠），这里宽容切分、统一用 ` / ` 拼。
+五行星的名单行少一颗 ★，匹配不上，天然只取六星——与 卡池一览 只取六星列同口径。
+"""
+
 标题正则 = re.compile(r"^(={2,4})(.+?)\1\s*$", re.M)
 
 # ---------- 类型映射 ----------
@@ -46,8 +53,14 @@ from .日志 import logger
     (list(长期活动.关键词们), 长期活动.类型值),   # 长期玩法：定义只有一份（src/长期活动.py）
 ]
 
-# 寻访条目由 卡池一览 wikitext 专门提供，公告页里的寻访分区直接跳过
+# 寻访条目由 卡池一览 wikitext 专门提供，公告页里的寻访分区直接跳过。
+# **例外**：标题含"甄选"的板块是甄选池——卡池一览由 bot 维护、上新滞后（定向甄选08
+# 公告已出而一览未录，2026-09-27 实测），公告板块是它登记前唯一的预告来源
 跳过关键词 = ["新装", "时装", "家具", "干员登场", "凭证", "寻访"]
+
+
+def 是甄选池板块(标题: str) -> bool:
+    return "甄选" in 标题
 
 
 def _匹配关键词(标题: str, 规则表: list) -> int | None:
@@ -188,6 +201,8 @@ class 板块:
     关卡各段: list[tuple[str, str]]
     类型: int
     是主体: bool                          # 主活动板块（SideStory/活动关卡）：◆ 段要另出一条 关卡
+    干员们: list[str] = field(default_factory=list)
+    """甄选池板块的六星名单（`甄选名单正则`）。抽不出来时为空——板块条目 据此不生成（宁缺毋重）。"""
 
 
 def _清理行(行: str) -> str:
@@ -207,7 +222,8 @@ def _清理行(行: str) -> str:
 def 抽板块(wikitext: str, 参考: datetime | None = None) -> list[板块]:
     """公告 wikitext → 板块列表。
 
-    跳过 寻访/时装 等板块（条目另有来源，见 跳过关键词）。
+    跳过 寻访/时装 等板块（条目另有来源，见 跳过关键词）；**甄选池板块例外**：
+    不跳过、改抽六星名单（`是甄选池板块`），交给 `板块条目` 生成卡池条目。
     `参考` = 父活动时间窗，用于给"只写 X月X日"的日期定年份（见 `解析时间`）。
     """
     匹配们 = list(标题正则.finditer(wikitext))
@@ -220,15 +236,21 @@ def 抽板块(wikitext: str, 参考: datetime | None = None) -> list[板块]:
         if not 标题 or 标题 == "目录":
             continue
 
-        if any(kw in 标题 for kw in 跳过关键词):
+        甄选池 = 是甄选池板块(标题)
+        if not 甄选池 and any(kw in 标题 for kw in 跳过关键词):
             continue
 
         # 收集分区正文里的非空文本行
         正文终点 = 匹配们[i + 1].start() if i + 1 < len(匹配们) else len(wikitext)
         活动时间 = None
         关卡各段: list[tuple[str, str]] = []
+        干员们: list[str] = []
 
         for 行 in wikitext[m.end():正文终点].splitlines():
+            if 甄选池 and not 干员们:
+                名单 = 甄选名单正则.search(行)
+                if 名单:
+                    干员们 = [x.strip() for x in re.split(r"[/\\]", 名单.group(1)) if x.strip()]
             t = _清理行(行)
             if not t:
                 continue
@@ -249,8 +271,9 @@ def 抽板块(wikitext: str, 参考: datetime | None = None) -> list[板块]:
             标题=标题,
             窗口=活动时间,
             关卡各段=关卡各段,
-            类型=分类章节(标题),
+            类型=0 if 甄选池 else 分类章节(标题),
             是主体=("活动关卡" in 标题 or "SideStory" in 标题),
+            干员们=干员们,
         ))
     return 结果
 
@@ -268,9 +291,38 @@ def 关卡条目(b: 板块, 父名: str) -> dict | None:
     }
 
 
+def _甄选池名(标题: str) -> str:
+    """甄选池板块标题 → 池名（不带期号）：`【定向甄选】限时寻访开启` → `定向甄选`。"""
+    m = re.search(r"[【「]([^】」]*甄选[^】」]*)[】」]", 标题)
+    if m:
+        return m.group(1)
+    m = re.search(r"(中坚甄选|定向甄选)", 标题)
+    return m.group(1) if m else "甄选"
+
+
 def 板块条目(b: 板块, 父名: str) -> list[dict]:
     """无人认领的板块自生成的条目（沿用既有命名规则）。"""
     结果 = []
+
+    if b.类型 == 0:
+        # 甄选池板块 → 卡池条目：名字与 卡池一览 同构（`【寻访】/【中坚池】` + 池名 + 干员名单），
+        # 但**不带期号**——合并认的键是"· "后的干员名单（`汇总_活动._身份键` 排序归一），
+        # 期号在不在都能与将来卡池一览登记的同一条**无缝换岗**（同键覆盖，不会两条并存）。
+        # 名单抽不出来就不生成：宁缺一条，不要公告版与卡池版对不齐的双份。
+        if b.窗口 and b.干员们:
+            池名 = _甄选池名(b.标题)
+            前缀 = "【中坚池】" if "中坚" in 池名 else "【寻访】"
+            结果.append({
+                "名称": f"{前缀}{池名} · {' / '.join(b.干员们)}",
+                "开始时间": b.窗口[0],
+                "结束时间": b.窗口[1],
+                "类型": 0,
+                "子类型": "甄选",
+                "_parent": 父名,
+            })
+        else:
+            logger.debug("甄选板块「%s」缺名单或窗口，不生成（宁缺毋重）", b.标题)
+        return 结果
 
     if _是独立活动(b.标题, 父名):
         if b.窗口:
