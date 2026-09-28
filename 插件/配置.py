@@ -16,7 +16,7 @@
 （插件目录 `字体/`，或 AstrBot 约定 `data/font.ttf` / `font-bold.ttf` / `font-mono.ttf`），
 见 docs/插件化.md「接上宿主」；请求条数与"进行中"宽限小时数也退到内核默认值（GK_* 可覆盖），
 它们只会让用户把图配错。阶段四又拿掉了 `render.reuse_seconds`：既然不留渲染缓存（「两次自我推翻」），
-就不存在"多久内复用旧图"这回事——想重画走 `/甘特图刷新`（阶段五）。
+就不存在"多久内复用旧图"这回事——想重画走 `/方舟日程 刷新`（阶段五）。
 """
 
 from __future__ import annotations

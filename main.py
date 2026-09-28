@@ -16,7 +16,7 @@
   字体/背景图留在插件目录里只读（「接上宿主」）；
 * **不留渲染缓存**：每次出图按当天数据现画（一次 matplotlib 几秒），
   从而不必维护签名、失效与落盘三套状态（「两次自我推翻」）；
-* **入口层只做五件事**：读配置、改订阅（`/订阅甘特图` / `/退订甘特图` 写回配置）、
+* **入口层只做五件事**：读配置、改订阅（`/方舟日程 订阅` / `退订` 写回配置）、
   说一句进度、出图、发图。判断（数据要不要刷、背景选哪张）全在 `渲染服务` 里——
   入口层多做一份"预判"只会多一条会分叉的路径；
 * 指令与回调的元数据只有一份：`插件/指令.py` 的 `CommandSpec`（「接上宿主」）。
@@ -56,13 +56,11 @@ import matplotlib  # noqa: E402,F401  —— 导入本身即"检查依赖"，别
 
 from .插件 import 文案  # noqa: E402
 from .插件.配置 import 读取配置  # noqa: E402
-from .插件.指令 import (  # noqa: E402
-    刷新命令, 帮助命令, 甘特图命令, 订阅命令, 退订命令, 状态命令, 初始化命令, 生成帮助文本,
-)
+from .插件.指令 import 甘特图命令, 生成帮助文本  # noqa: E402
 from .插件.渲染 import 素材缺失, 渲染服务  # noqa: E402
 from .插件.推送 import 推送状态, 推送服务, 加进目标, 移出目标  # noqa: E402
 
-插件版本 = "0.1.5"
+插件版本 = "0.1.6"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""
 
 
@@ -216,11 +214,48 @@ class GanttKnightsPlugin(Star):
     # ==================== 指令 ====================
 
     @filter.command(甘特图命令.name, alias=甘特图命令.alias_set)
-    async def 出图(self, event: AstrMessageEvent):
-        """生成明日方舟近期活动甘特图长图。"""
+    async def 方舟日程(self, event: AstrMessageEvent, 子命令: str = ""):
+        """近期活动甘特图：不带参数出图，子命令（订阅/退订/状态/刷新/初始化/帮助）分发。
+
+        子命令由宿主的 CommandFilter 解析成 `子命令` 参数（指令后空格分隔的第一个词，
+        多余的词静默忽略）。管理员判定也收进来（`event.is_admin()`，与宿主
+        PermissionTypeFilter 的判据同源）——比装饰器拦截多一个好处：非管理员能收到
+        一句"仅管理员可用"，而不是石沉大海。
+        """
         运行配置 = self.运行配置()
-        # 顺手重新武装一次定时任务（配置在 WebUI 里改过时不必重启插件）
+        # 顺手重新武装一次定时任务（幂等且便宜：配置在 WebUI 里改过就不必重启插件）
         self.推送.确保任务(运行配置)
+        子 = 子命令.strip()
+
+        if 子 == "订阅":
+            yield event.plain_result(self._改订阅(event.unified_msg_origin, 订阅=True))
+            return
+        if 子 == "退订":
+            yield event.plain_result(self._改订阅(event.unified_msg_origin, 订阅=False))
+            return
+        if 子 == "状态":
+            yield event.plain_result(self._状态文本(event))
+            return
+        if 子 == "帮助":
+            yield event.plain_result(生成帮助文本(插件版本))
+            return
+        if 子 in ("刷新", "初始化"):
+            if not event.is_admin():
+                yield event.plain_result(文案.仅管理员)
+                return
+            if 子 == "刷新":
+                async for 结果文本 in self._刷新流程(event, 运行配置, 回溯已结束=False):
+                    yield 结果文本
+            else:
+                self.渲染.重建数据()      # 删掉旧 CSV 与当天日差 → 从零重建（多余/错年份的行一并清掉）
+                async for 结果文本 in self._刷新流程(event, 运行配置, 回溯已结束=True):
+                    yield 结果文本
+            return
+        if 子:
+            yield event.plain_result(文案.不认识子命令.format(子命令=子))
+            return
+
+        # —— 不带子命令：出图 ——
         yield event.plain_result(文案.准备中)
         try:
             结果 = await self.渲染.出图(
@@ -238,82 +273,31 @@ class GanttKnightsPlugin(Star):
             logger.exception("生成甘特图失败")
             yield event.plain_result(文案.渲染失败)
 
-    @filter.command(订阅命令.name, alias=订阅命令.alias_set)
-    async def 订阅(self, event: AstrMessageEvent):
-        """把本会话加入每日推送（群聊、私聊都可以）。"""
-        yield event.plain_result(self._改订阅(event.unified_msg_origin, 订阅=True))
-
-    @filter.command(退订命令.name, alias=退订命令.alias_set)
-    async def 退订(self, event: AstrMessageEvent):
-        """把本会话移出每日推送。"""
-        yield event.plain_result(self._改订阅(event.unified_msg_origin, 订阅=False))
-
-    @filter.command(状态命令.name, alias=状态命令.alias_set)
-    async def 状态(self, event: AstrMessageEvent):
-        """查看数据/缓存/每日推送的现状。"""
-        # 顺手重新武装：状态页里报的"下次推送"必须与实际生效的一致
-        self.推送.确保任务(self.运行配置())
-        yield event.plain_result(self._状态文本(event))
-
-    @filter.command(刷新命令.name, alias=刷新命令.alias_set)
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    async def 刷新(self, event: AstrMessageEvent):
-        """强制重新抓数据并重画（管理员）。"""
-        yield event.plain_result(文案.强制刷新中)
+    async def _刷新流程(self, event: AstrMessageEvent, 运行配置, *, 回溯已结束: bool):
+        """管理员「刷新 / 初始化」的共用流程：进度一句 → 出图 →（初始化附日差）→ 图。"""
+        yield event.plain_result(文案.初始化中 if 回溯已结束 else 文案.强制刷新中)
         try:
             结果 = await self.渲染.出图(
-                现在时间=datetime.now(), 运行配置=self.运行配置(),
-                自动更新=True, 强制刷新=True,
+                现在时间=datetime.now(), 运行配置=运行配置,
+                自动更新=True, 强制刷新=True, 回溯已结束=回溯已结束,
             )
             图片 = Path(结果.图片路径)
             if not self.渲染.产物可用(图片):
                 yield event.plain_result(文案.渲染失败)
                 return
-            yield event.image_result(str(图片))
-        except 素材缺失 as exc:
-            yield event.plain_result(文案.说明素材缺失(exc))
-        except Exception:
-            logger.exception("强制刷新失败")
-            yield event.plain_result(文案.渲染失败)
-
-    @filter.command(初始化命令.name, alias=初始化命令.alias_set)
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    async def 初始化(self, event: AstrMessageEvent):
-        """全量重建数据（管理员）：连更老的已结束活动的公告一起扫。
-
-        等价 `python cli.py --bootstrap --force`。什么时候需要：wiki 会**复用老活动页**
-        来排复刻/长期轮换，这些内容只有全量扫描才看得到（日常维护只看"进行中 ∪ 近 30 天内
-        结束过"的活动）。全新安装时插件会自动做一次，所以这条指令是"我怀疑数据不全"时的手动入口。
-        """
-        yield event.plain_result(文案.初始化中)
-        try:
-            self.渲染.重建数据()      # 删掉旧 CSV 与当天日差 → 从零重建（多余/错年份的行一并清掉）
-            结果 = await self.渲染.出图(
-                现在时间=datetime.now(), 运行配置=self.运行配置(),
-                自动更新=True, 强制刷新=True, 回溯已结束=True,
-            )
-            图片 = Path(结果.图片路径)
-            if not self.渲染.产物可用(图片):
-                yield event.plain_result(文案.渲染失败)
-                return
-            if 结果.变化:
+            if 回溯已结束 and 结果.变化:
                 yield event.plain_result(结果.变化)
             yield event.image_result(str(图片))
         except 素材缺失 as exc:
             yield event.plain_result(文案.说明素材缺失(exc))
         except Exception:
-            logger.exception("全量初始化失败")
+            logger.exception("全量初始化失败" if 回溯已结束 else "强制刷新失败")
             yield event.plain_result(文案.渲染失败)
-
-    @filter.command(帮助命令.name, alias=帮助命令.alias_set)
-    async def 帮助(self, event: AstrMessageEvent):
-        """查看本插件全部指令。"""
-        yield event.plain_result(生成帮助文本(插件版本))
 
     # ==================== 状态文本 ====================
 
     def _状态文本(self, event: AstrMessageEvent) -> str:
-        """`/甘特图状态`：数据新鲜度 / 日差 / 推送武装情况 / 本会话标识。
+        """`/方舟日程 状态`：数据新鲜度 / 日差 / 推送武装情况 / 本会话标识。
 
         刻意不报"缓存条数"之类的东西——渲染不留缓存（「两次自我推翻」），状态页只回答
         "数据新不新、今天推送会不会来、上次推得怎么样"。
@@ -331,7 +315,7 @@ class GanttKnightsPlugin(Star):
         快照日期 = self.渲染.最近变化日期() or "无"
         目标们 = 运行配置.推送目标
         本会话 = event.unified_msg_origin
-        在列 = "已在推送目标里" if 本会话 in 目标们 else "不在推送目标里（发 /订阅甘特图 加入）"
+        在列 = "已在推送目标里" if 本会话 in 目标们 else "不在推送目标里（发 /方舟日程 订阅 加入）"
         上次 = self.推送状态.上次()
         上次行 = ""
         if 上次:
@@ -346,7 +330,7 @@ class GanttKnightsPlugin(Star):
                 if 说明:
                     上次行 += f"（{说明}）"
         return (
-            f"明日方舟甘特图 v{插件版本}｜数据 {数据行}｜日差 {快照日期}\n"
+            f"明日方舟甘特图 v{插件版本}｜数据 {数据行}｜上次变化 {快照日期}\n"
             f"{self.推送.一句话(运行配置)}｜目标 {len(目标们)} 个\n"
             f"本会话：{本会话}（{在列}）"
             f"{上次行}"

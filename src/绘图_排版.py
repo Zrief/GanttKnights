@@ -390,8 +390,13 @@ def 行轴(fig, gs, 行号: int):
 
 # ============================ 页眉 ============================
 
-def 填页眉(ax, fig, 主题: 主题, 现在: datetime, 标题: str = 图标题) -> None:
-    """页眉直接坐在整图背景上，只补一层左侧渐变保证标题可读"""
+def 填页眉(ax, fig, 主题: 主题, 现在: datetime, 标题: str = 图标题,
+           数据时间: datetime | None = None) -> None:
+    """页眉直接坐在整图背景上，只补一层左侧渐变保证标题可读。
+
+    `数据时间` = 活动数据（CSV）的更新时刻——**不是这次作图的时刻**：同一天里出多少次图，
+    数据都是同一份，用户要看的是"数据新鲜不新鲜"（2026-09-28 定；此前误用了渲染时刻）。
+    """
     bb = ax.get_position()
     宽 = bb.width * fig.bbox.width
     高 = bb.height * fig.bbox.height
@@ -424,7 +429,7 @@ def 填页眉(ax, fig, 主题: 主题, 现在: datetime, 标题: str = 图标题
     ax.text(右, 高 / 2 + 12, "数据来源 PRTS Wiki", fontsize=17, color=主题.主文,
             ha="right", va="center", zorder=4, fontweight=粗字重,
             path_effects=粗体(主题.主文, 0.8))
-    ax.text(右, 高 / 2 - 18, f"更新于 {现在:%Y-%m-%d %H:%M}", fontsize=10.5,
+    ax.text(右, 高 / 2 - 18, f"更新于 {(数据时间 or 现在):%Y-%m-%d %H:%M}", fontsize=10.5,
             color=主题.次文, ha="right", va="center", zorder=4)
 
 
@@ -746,8 +751,11 @@ def 建分区(新增: dict) -> list[tuple[str, list[dict]]]:
 def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]]], 记录,
               主题: 主题, 左边界: datetime, 右边界: datetime,
               背景路径: str | Path, 现在: datetime,
-              标题: str = 图标题) -> str:
-    """定宽（两遍装箱）→ 建画布 → 画页眉/甘特/底栏 → 存图；返回版面概况"""
+              标题: str = 图标题, 数据时间: datetime | None = None) -> str:
+    """定宽（两遍装箱）→ 建画布 → 画页眉/甘特/底栏 → 存图；返回版面概况
+
+    `数据时间`：活动数据（CSV）的更新时刻，页眉"更新于"用它（缺省退回 `现在`）。
+    """
     _确保字体就绪()
     有效 = [(区名, 条目们) for 区名, 条目们 in 分区 if 条目们]
     # ⚠️ 两个"行"不是一回事：`底栏行们` 是底栏的卡片行，甘特的行数得按 `分行()` 算——
@@ -755,7 +763,7 @@ def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]
     甘特行数 = len(分行(记录, 左边界, 右边界))
     图宽px, 底栏行们, 格宽px = 定图宽(甘特行数, 有效)
     fig, gs, ax_页眉, ax_chart = 建分区画布(甘特行数, len(底栏行们), 主题, 背景路径, 图宽px)
-    填页眉(ax_页眉, fig, 主题, 现在, 标题)
+    填页眉(ax_页眉, fig, 主题, 现在, 标题, 数据时间)
     填甘特区(ax_chart, fig, 记录, 主题, 左边界, 右边界, 现在)
     for r, 行 in enumerate(底栏行们):
         填行(行轴(fig, gs, r), fig, 行, 格宽px, 主题)
