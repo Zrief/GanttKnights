@@ -594,7 +594,6 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
     ax.add_line(Line2D([0, 轴宽], [顶, 顶], color=主题.分隔, linewidth=1, zorder=8))
     ax.add_line(Line2D([甘特左列px, 甘特左列px], [0, 轴高], color=主题.分隔,
                        linewidth=1, zorder=8))
-    上次右 = -1e9
     for d in range(总天 + 1):
         日 = 左边界 + timedelta(days=d)
         if 日 > 右边界:
@@ -604,31 +603,27 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         轴色 = 主题.今天 if 是今天 else 主题.分隔
         ax.add_line(Line2D([xx, xx], [顶, 轴高], color=轴色,
                            linewidth=3 if 是今天 else 1, zorder=9))
-        # 每天一个刻度；只在真的放不下时才跳过（今天永远保留）
+        # 右边界那道刻度只画线不写字：它标记窗口终点，当天在窗内没有格子，
+        # 文字只能右对齐挤进最后一天的格子，和那天的标签叠在一起
+        if 日 >= 右边界:
+            continue
         # 刻度只写日号；月份是锚点不是逐格信息——每月 1 号写 `M月`（顶替 `01`），
         # 窗口最左一格也标月（页眉没有日期信息，头几格需要一个锚点才知道是几月）。
-        # 注：文本宽度按 11 号估，实际绘制用的是 11.5 号（历史遗留，见 docs 记录）
+        # 每格一签必然放得下：最窄格 ~64px（图宽 1800 / 25 天），最宽标签 ~56px（"10月"）
         是锚点 = 日.day == 1 or d == 0
         刻度 = f"{日.month}月" if 是锚点 else f"{日.day}"
-        字宽 = 文本宽(刻度, 11, family=等宽)
-        贴左 = xx + 8 + 字宽 < 轴宽
-        左 = xx + 8 if 贴左 else xx - 8 - 字宽
-        if 左 < 上次右 + 6 and not 是今天:
-            continue
-        上次右 = 左 + 字宽
         # 三档层级：今天（强调色+粗）> 锚点（主文+粗）> 日号（次文、常规）。
         # 日号退到次文色——"密"的体量来自 22 个主文色标签；锚点加粗才看得出结构。
         # 今天恰逢锚点时强调色优先，两条规则都指向加粗，天然兼容。
         轴字色 = 主题.今天 if 是今天 else (主题.主文 if 是锚点 else 主题.次文)
         加重 = 是今天 or 是锚点
-        ax.text(xx + (8 if 贴左 else -8), 顶 + 42, 刻度, fontsize=11.5,
-                color=轴字色, family=等宽,
-                ha="left" if 贴左 else "right", va="center",
+        ax.text(xx + 8, 顶 + 42, 刻度, fontsize=11.5,
+                color=轴字色, family=等宽, ha="left", va="center",
                 zorder=10, fontweight=粗字重 if 加重 else "normal",
                 path_effects=粗体(轴字色, 0.7) if 加重 else None)
-        ax.text(xx + (8 if 贴左 else -8), 顶 + 17, f"周{周名[日.weekday()]}",
+        ax.text(xx + 8, 顶 + 17, f"周{周名[日.weekday()]}",
                 fontsize=10, color=主题.今天 if 是今天 else 主题.次文,
-                ha="left" if 贴左 else "right", va="center", zorder=10)
+                ha="left", va="center", zorder=10)
 
 
 # ============================ 底栏卡片 ============================

@@ -4,13 +4,20 @@
 HTML。以板块标题文本为主锚点、mp-operators-title 类名做板块边界；
 href/title/图标 src 逐属性独立提取，不依赖标签内属性顺序。
 板块本身没有时间信息，展示时挂到当前活动/版本窗口。
+
+另含一套**备用取法**（解析数据子页/自算凭证）：PRTS 首页在皮肤迁移，
+三栏的真身是两个机器可读数据子页（旧版 HTML 与新版共用这份数据）。
+主路径（HTML 解析）整块失效时由 流水线.更新增预告 切过来用。
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
-from urllib.parse import urljoin
+from datetime import datetime
+from urllib.parse import quote, urljoin
 
+from .获取_prts import PRTS_API, 请求
 from .日志 import logger
 
 PRTS_BASE = "https://prts.wiki"
@@ -82,3 +89,80 @@ def 解析新增内容(首页html: str) -> dict[str, list[dict]]:
 def _缓存文件名(类型: str, 干员: str, 名称: str) -> str:
     名 = f"{类型}_{干员}" + (f"_{名称}" if 名称 else "")
     return 非法文件字符.sub("_", 名) + ".png"
+
+
+# ---------------- 备用取法：数据子页（主路径整块失效时顶上，见 流水线.更新增预告） ----------------
+#
+# 三栏数据的真身是「首页/亮点干员/新增皮肤(模组)/数据」两个机器可读子页——旧版 HTML
+# 结构与新版首页共用这份数据，皮肤迁移删掉 /旧版 页后它们仍在。
+# 图标不在数据页里，但 wiki 模板的文件名规则是确定的，零请求本地构造：
+#   时装 头像_{干员}_skin{N}.png / 模组 头像_{干员}_2.png（"2" 是 wiki 模板硬编码）/ 凭证 头像_{干员}.png
+# URL 的散列目录取文件名 MD5（MediaWiki 规则），实测与首页引用逐字一致。
+
+MEDIA = "https://media.prts.wiki"
+甄选排除 = {"中坚甄选", "跨年欢庆·中坚"}
+
+时装数据解析 = re.compile(r"1=([^:,]+):skin=(\d+)")
+模组数据解析 = re.compile(r"1=([^:,]+):2=([^:,]+):3=([^,]+)")
+
+
+def 构造图标URL(文件名: str) -> str:
+    摘要 = hashlib.md5(文件名.encode()).hexdigest()
+    return f"{MEDIA}/{摘要[0]}/{摘要[:2]}/{quote(文件名)}"
+
+
+def 解析数据子页(时装文本: str, 模组文本: str) -> dict[str, list[dict]]:
+    """两个数据子页 → 与 解析新增内容 同构的预告 dict（凭证另由 自算凭证 补上）。
+
+    数据页格式（页名即上面的注释）：时装 `1=空构:skin=1,1=承曦格雷伊:skin=3`，
+    模组 `1=结城理:2=PUM-Y:3=彼此的声音,…`。"""
+    时装们 = []
+    for 干员, skin in 时装数据解析.findall(时装文本 or ""):
+        干员 = 干员.strip()
+        时装们.append({
+            "干员": 干员, "名称": "",
+            "图标": 构造图标URL(f"头像_{干员}_skin{skin}.png"),
+            "图标文件名": _缓存文件名("时装", 干员, ""),
+        })
+    模组们 = []
+    for 干员, _代号, 模组名 in 模组数据解析.findall(模组文本 or ""):
+        干员, 模组名 = 干员.strip(), 模组名.strip()
+        模组们.append({
+            "干员": 干员, "名称": 模组名,
+            "图标": 构造图标URL(f"头像_{干员}_2.png"),
+            "图标文件名": _缓存文件名("模组", 干员, 模组名),
+        })
+    return {"时装": 时装们, "模组": 模组们, "凭证": []}
+
+
+def 自算凭证(现在时间: datetime) -> list[dict]:
+    """凭证兑换自算：与 wiki「凭证兑换」板块同款的两条 ask（查当前开放池的商店兑换干员）。
+
+    注：SMW 的 [[属性::!值]] 否定经 api.php 会静默返回空（wiki 页面上能用），
+    所以中坚寻访的「排除中坚甄选/跨年欢庆·中坚」在这里用 Python 过滤。"""
+    截至时刻 = 现在时间.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+    条目们: list[dict] = []
+    seen: set[str] = set()
+    for 分类, 带名 in (("常驻标准寻访", False), ("中坚寻访", True)):
+        查询 = (f"[[分类:国服寻访]][[分类:{分类}]]"
+                f"[[寻访开启时间cn::<<{截至时刻}]][[寻访关闭时间cn::>>{截至时刻}]]|?商店兑换干员"
+                + ("|?寻访名cn" if 带名 else ""))
+        resp = 请求(PRTS_API, params={"action": "ask", "format": "json", "query": 查询})
+        if resp is None:
+            continue
+        results = resp.json().get("query", {}).get("results", {})
+        for _, 数据 in (results.items() if isinstance(results, dict) else ()):
+            printouts = 数据.get("printouts", {})
+            if 带名 and any(名 in 甄选排除 for 名 in printouts.get("寻访名cn", [])):
+                continue
+            for 名 in printouts.get("商店兑换干员", []):
+                名 = str(名).strip()
+                if not 名 or 名 in seen:
+                    continue
+                seen.add(名)
+                条目们.append({
+                    "干员": 名, "名称": "",
+                    "图标": 构造图标URL(f"头像_{名}.png"),
+                    "图标文件名": _缓存文件名("凭证", 名, ""),
+                })
+    return 条目们

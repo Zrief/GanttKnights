@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -60,7 +61,7 @@ from .插件.指令 import 甘特图命令, 生成帮助文本  # noqa: E402
 from .插件.渲染 import 素材缺失, 渲染服务  # noqa: E402
 from .插件.推送 import 推送状态, 推送服务, 加进目标, 移出目标  # noqa: E402
 
-插件版本 = "0.1.6"
+插件版本 = "0.1.7"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""
 
 
@@ -313,6 +314,12 @@ class GanttKnightsPlugin(Star):
         else:
             数据行 = "还没有（首次出图时抓取）"
         快照日期 = self.渲染.最近变化日期() or "无"
+        三栏 = "旧版"
+        try:
+            预告 = json.loads(Path(设置.new_items_path).read_text(encoding="utf-8"))
+            三栏 = 预告.get("取法") or "旧版"
+        except Exception:
+            pass
         目标们 = 运行配置.推送目标
         本会话 = event.unified_msg_origin
         在列 = "已在推送目标里" if 本会话 in 目标们 else "不在推送目标里（发 /方舟日程 订阅 加入）"
@@ -330,7 +337,7 @@ class GanttKnightsPlugin(Star):
                 if 说明:
                     上次行 += f"（{说明}）"
         return (
-            f"明日方舟甘特图 v{插件版本}｜数据 {数据行}｜上次变化 {快照日期}\n"
+            f"明日方舟甘特图 v{插件版本}｜数据 {数据行}｜上次变化 {快照日期}｜首页三栏 {三栏}\n"
             f"{self.推送.一句话(运行配置)}｜目标 {len(目标们)} 个\n"
             f"本会话：{本会话}（{在列}）"
             f"{上次行}"
