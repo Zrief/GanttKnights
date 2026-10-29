@@ -49,8 +49,23 @@ from __future__ import annotations
 )
 
 
+缺字体 = (
+    "当前环境里没有可用的中文字体，图里的中文会变成方块，已停止生成。\n"
+    "两种解决办法（任选其一）：\n"
+    "1. 更新镜像：官方镜像 2026-08-26 起已内置中文字体，"
+    "重新执行 docker pull soulter/astrbot:latest 并重建容器；\n"
+    "2. 手动放一支中文字体（如思源黑体）到 AstrBot 数据目录的 font.ttf，"
+    "重启后生效。"
+)
+
+
 def 说明素材缺失(exc) -> str:
     """`素材缺失` 异常 → 给用户看的一句话（区分"目录空"与"指定的文件不在"）"""
     if getattr(exc, "文件", ""):
         return 缺背景文件.format(文件=exc.文件)
     return 缺背景图.format(目录=exc.目录)
+
+
+def 说明字体缺失() -> str:
+    """`字体缺失` 异常 → 给用户看的修法指引"""
+    return 缺字体

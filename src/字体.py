@@ -15,9 +15,10 @@
 2. `settings.额外字体`：插件传入 AstrBot 文档化的自定义字体插槽
    （`data/font.ttf` / `font-bold.ttf` / `font-mono.ttf`，见 `core/config/default.py` 的 t2i 提示）；
    另有单文件开关 `settings.font_path` + `settings.font_family`；
-3. **平台自带 CJK 家族**（`无衬线候选` / `等宽候选`，沿用 AstrBot 的本地文转图策略
-   `astrbot/core/utils/t2i/local_strategy.py:34-111`）：Windows 微软雅黑、macOS 苹方 / Hiragino、
-   Linux 与官方 Docker 镜像的 Noto CJK。
+3. **平台自带 CJK 家族**（`无衬线候选` / `等宽候选`，顺序沿用 AstrBot 本地文转图策略
+   的候选表——其 FontManager 2026-08 重写后两边已各自独立）：Windows 微软雅黑、macOS 苹方 / Hiragino、
+   Linux 与官方 Docker 镜像的 Noto CJK（镜像 2026-08-26 起内置 fonts-noto-cjk，
+   更早的镜像没有——见 docs 字体章节 / GitHub issue）。
 
 不使用衬线（2026-09 决定，理由见 docs「接上宿主」）：衬线只用在页眉标题与底栏分区标签两处，
 而所有候选字体的汉字 advance 都是 1.000em，换族对版面零影响，少依赖一支 25MB 的字体文件。
@@ -211,6 +212,12 @@ def _装自定义字体() -> tuple[dict[str, str], str]:
     return 自定义, ("自定义" if 自定义 else "")
 
 
+class 字体缺失(RuntimeError):
+    """三层候选全部落空、连一个能画中文的字体都找不到（典型：早期官方 Docker
+    镜像没装 CJK 字体，见 README 常见问题）。此时继续画只会得到一张豆腐图，
+    不如抛出去让入口层把"怎么修"告诉用户（与 流水线.背景图缺失 同一套路）。"""
+
+
 def 注册字体(强制: bool = False) -> 字体方案:
     """注册所有可用字体源 → 挑出角色字体 → 应用到 rcParams。
 
@@ -240,9 +247,13 @@ def 注册字体(强制: bool = False) -> 字体方案:
 
     无衬线 = _挑族(候选无衬线)
     等宽 = _挑族(候选等宽)
-    if 无衬线 is None:      # 连 DejaVu 都解析不到（几乎不可能）：退回 matplotlib 默认，别抛异常
-        logger.error("找不到任何可用字体，中文会显示为方块")
-        无衬线 = ("sans-serif", "")
+    if 无衬线 is None:
+        # 三层候选全落空：继续画只会把豆腐图发进群（2026-10 Docker issue 实例），
+        # 抛出去让入口层告诉用户怎么修。此前这里是 error 日志 + 静默降级。
+        raise 字体缺失(
+            "没有可用的中文字体：更新镜像（2026-08-26 起官方镜像已内置），"
+            "或放一支中文字体到 AstrBot 数据目录的 font.ttf"
+        )
     if 等宽 is None:
         等宽 = 无衬线
 

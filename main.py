@@ -58,10 +58,10 @@ import matplotlib  # noqa: E402,F401  —— 导入本身即"检查依赖"，别
 from .插件 import 文案  # noqa: E402
 from .插件.配置 import 读取配置  # noqa: E402
 from .插件.指令 import 甘特图命令, 生成帮助文本  # noqa: E402
-from .插件.渲染 import 素材缺失, 渲染服务  # noqa: E402
+from .插件.渲染 import 字体缺失, 素材缺失, 渲染服务  # noqa: E402
 from .插件.推送 import 推送状态, 推送服务, 加进目标, 移出目标  # noqa: E402
 
-插件版本 = "0.2.0"
+插件版本 = "0.2.1"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""
 
 
@@ -270,6 +270,8 @@ class GanttKnightsPlugin(Star):
             yield event.image_result(str(图片))
         except 素材缺失 as exc:
             yield event.plain_result(文案.说明素材缺失(exc))
+        except 字体缺失:
+            yield event.plain_result(文案.说明字体缺失())
         except Exception:
             logger.exception("生成甘特图失败")
             yield event.plain_result(文案.渲染失败)
@@ -291,6 +293,8 @@ class GanttKnightsPlugin(Star):
             yield event.image_result(str(图片))
         except 素材缺失 as exc:
             yield event.plain_result(文案.说明素材缺失(exc))
+        except 字体缺失:
+            yield event.plain_result(文案.说明字体缺失())
         except Exception:
             logger.exception("全量初始化失败" if 回溯已结束 else "强制刷新失败")
             yield event.plain_result(文案.渲染失败)

@@ -28,6 +28,7 @@ from src.流水线 import (
     渲染结果,
     render_once,
 )
+from src.字体 import 字体缺失
 from src.日志 import logger
 
 
@@ -86,7 +87,7 @@ if __name__ == "__main__":
     setup_logging()
     try:
         main(force=args.force, bootstrap=args.bootstrap)
-    except 背景图缺失 as exc:
+    except (背景图缺失, 字体缺失) as exc:
         # 内核只抛普通异常（SystemExit 会穿透插件的 to_thread 杀掉任务链），
         # "退出码"这件事归入口层管：这里翻译成一句话 + 退出码 1。
         logger.error("%s", exc)

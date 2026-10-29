@@ -617,8 +617,12 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         # 今天恰逢锚点时强调色优先，两条规则都指向加粗，天然兼容。
         轴字色 = 主题.今天 if 是今天 else (主题.主文 if 是锚点 else 主题.次文)
         加重 = 是今天 or 是锚点
+        # 刻度走等宽族是为了数字对齐，但等宽候选的最终兜底 DejaVu Sans Mono
+        # 不含中文——只有一支中文字体的环境（Docker 手动补字体，2026-10 issue）
+        # 里"月"字会变方块。family 给两级列表，mpl 按字形回退：数字用等宽、
+        # 中文落到无衬线（标题族即无衬线，见 _确保字体就绪）。
         ax.text(xx + 8, 顶 + 42, 刻度, fontsize=11.5,
-                color=轴字色, family=等宽, ha="left", va="center",
+                color=轴字色, family=[等宽, 标题族], ha="left", va="center",
                 zorder=10, fontweight=粗字重 if 加重 else "normal",
                 path_effects=粗体(轴字色, 0.7) if 加重 else None)
         ax.text(xx + 8, 顶 + 17, f"周{周名[日.weekday()]}",
