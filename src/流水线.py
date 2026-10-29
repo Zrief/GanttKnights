@@ -78,7 +78,20 @@ def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> "数据
     返回**本次合并相对原有数据的变化**（`src/数据变化.py` 的 `数据变化`）——
     "今天和昨天比变了什么"就是由合并动作本身回答的，不需要事后对比两份数据。
     首页新增预告（凭证/时装/模组）不在活动数据里，由 更新增预告() 单独按天刷新。
+
+    `回溯已结束=True` = 初始化（CLI `--bootstrap` / 插件 `/方舟日程 初始化` /
+    全新安装自动初始化）：**先删掉旧 CSV 与当天日差，从零重建**。只扩扫描范围
+    不删的话，改过名/改过类型的旧行（日常窗口扫不到、清理线不过期）会永久
+    残留。删完合并会把结果标记为"首次建立"，不报成"新增几百条"。
     """
+    if 回溯已结束:
+        from .数据变化 import 默认路径
+
+        for 路径 in (Path(settings.all_data_path), 默认路径(settings.数据目录)):
+            try:
+                路径.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("初始化删不掉（继续，重建会覆盖它）：%s", 路径, exc_info=True)
     try:
         api原始 = 获取事件列表(settings.api_limit)
     except Exception:

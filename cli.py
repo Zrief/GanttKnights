@@ -80,7 +80,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--bootstrap",
         action="store_true",
-        help="初始化：连更老的已结束活动的公告一起扫，补录剿灭/保全轮换与复刻排期（数据初次建立时配合 --force 跑一次）",
+        help="初始化：先删掉现有数据从零重建（会翻所有历史活动的公告，补录剿灭/保全轮换与复刻排期；数据初次建立或清理改名残留时配合 --force 跑一次）",
     )
     args = parser.parse_args()
     setup_logging()

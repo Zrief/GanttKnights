@@ -49,7 +49,6 @@ from .日志 import logger
 朝副色那一侧留得更长（保留"主 → 副"的方向感），反侧只占剩下的一小段。
 既不在端点（不会被某一个类型独占）也不在正中（两端余量不平均，画面更均衡）。
 """
-对比下限 = 4.5              # WCAG AA
 
 # —— 第二层：饱和度固定档（Oklab 彩度 C）——
 # 整体压低彩度往莫兰迪（浊色）方向靠：大面积更浊，文字近乎中性
@@ -69,7 +68,6 @@ L_条深 = 0.66
 对比_次级 = 0.50
 对比_弱化 = 0.34
 L_强调 = 0.72
-L_小色块 = 0.62
 
 
 def _造色(色相度: float, L: float, C: float) -> str:
@@ -207,17 +205,6 @@ class 主题:
         """
         return _造色(self.色相(t), 亮度, C_大色块)
 
-    def 小色块(self, t: float) -> str:
-        """小面积（徽标、顶部色条、行首色条）：同族浊色，配白字，明度按对比度下探"""
-        h = self.色相(t)
-        L = L_小色块
-        while L > 0.30:
-            色 = _造色(h, L, C_主色系)
-            if 对比度(色, self.主文) >= 对比下限:
-                return 色
-            L -= 0.04
-        return _造色(h, L, C_主色系)
-
     def 对色(self, 底色: str) -> str:
         return (self.主文 if 对比度(self.主文, 底色) >= 对比度(self.面板题, 底色)
                 else self.面板题)
@@ -231,10 +218,6 @@ class 主题:
     def 面板标题色(self, t: float) -> str:
         """分区名用本区的深色调，让"这一区是什么色"由文字再确认一次"""
         return _造色(self.色相(t), L_面板 - 0.62, C_主色系 * 1.1)
-
-    def 面板描边(self, t: float) -> str:
-        """面板标题下的细分隔线：同色相的淡一档"""
-        return _造色(self.色相(t), L_面板 - 0.13, C_面板染色)
 
     def 描边RGB(self) -> tuple[int, int, int, int]:
         r, g, b = (int(self.描边[i:i + 2], 16) for i in (1, 3, 5))

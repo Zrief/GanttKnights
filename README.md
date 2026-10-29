@@ -23,7 +23,7 @@
 pip install httpx matplotlib Pillow numpy
 python cli.py                      # 出图到 数据/Gantt.jpg
 python cli.py --force              # 重新抓数据
-python cli.py --bootstrap --force  # 首次建数据：翻老公告，把剿灭轮换、复刻排期补进来
+python cli.py --bootstrap --force  # 首次建数据：删旧数据从零重建，翻老公告补录剿灭轮换、复刻排期
 ```
 
 <!-- 仓库根那份 Gantt.jpg 是开头展示图的快照，要更新就手动覆盖（维护者备注，读者不用管）。 -->

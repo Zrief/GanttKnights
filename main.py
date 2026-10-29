@@ -61,7 +61,7 @@ from .插件.指令 import 甘特图命令, 生成帮助文本  # noqa: E402
 from .插件.渲染 import 素材缺失, 渲染服务  # noqa: E402
 from .插件.推送 import 推送状态, 推送服务, 加进目标, 移出目标  # noqa: E402
 
-插件版本 = "0.1.7"
+插件版本 = "0.2.0"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""
 
 
