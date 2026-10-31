@@ -35,7 +35,7 @@ from random import choice
 
 from .config import settings
 from .获取_prts import 下载图片, 获取事件列表, 获取首页
-from .汇总_活动 import 合并保存CSV, 合并商店, 去重排序
+from .汇总_活动 import 合并保存CSV, 合并商店, 去重排序, 身份冲突, 检查身份写回
 from .解析_API活动 import API转活动列表
 from .生成_提醒 import 开始偏移默认, 结束偏移默认, 生成提醒
 from .筛选_活动 import preprocess_data
@@ -67,6 +67,7 @@ class 渲染结果:
     只在日志、`/方舟日程 状态`（日期）与 `/方舟日程 初始化` 的回显里用；**不进每日推送**（2026-09-15 定）。"""
 
     有提醒: bool = False
+    更新提示: str = ""
     """`提醒` 是否言之有物（不是"无需提醒"那句回落）——推送据此决定要不要发文字。"""
 
 
@@ -79,30 +80,41 @@ def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> "数据
     "今天和昨天比变了什么"就是由合并动作本身回答的，不需要事后对比两份数据。
     首页新增预告（凭证/时装/模组）不在活动数据里，由 更新增预告() 单独按天刷新。
 
-    `回溯已结束=True` = 初始化（CLI `--bootstrap` / 插件 `/方舟日程 初始化` /
-    全新安装自动初始化）：**先删掉旧 CSV 与当天日差，从零重建**。只扩扫描范围
-    不删的话，改过名/改过类型的旧行（日常窗口扫不到、清理线不过期）会永久
-    残留。删完合并会把结果标记为"首次建立"，不报成"新增几百条"。
+    初始化（`回溯已结束=True`）＝全量扫描后**覆盖重建**：本次扫描结果直接替换旧数据，
+    旧行与旧六列格式都不保留；重建不会跳过身份校验，网络/解析/校验失败时旧文件必须原样保留。
+    日常刷新是增量合并，不删除本次没抓到的行。
     """
-    if 回溯已结束:
-        from .数据变化 import 默认路径
+    from .更新状态 import 记录更新状态
+    def 记状态(问题=(), *, 成功=True):
+        记录更新状态(settings.数据目录, 现在字符串, 问题, 成功=成功)
 
-        for 路径 in (Path(settings.all_data_path), 默认路径(settings.数据目录)):
-            try:
-                路径.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("初始化删不掉（继续，重建会覆盖它）：%s", 路径, exc_info=True)
+    if 回溯已结束:
+        logger.info("初始化扫描：全量扫描后**覆盖重建**（旧数据与旧格式都不保留）")
     try:
         api原始 = 获取事件列表(settings.api_limit)
     except Exception:
         logger.exception("获取事件列表失败（网络可能断开了）")
+        记状态(('获取事件列表失败，请查看日志',), 成功=False)
         return None
     if not api原始:
         logger.warning("API 未返回数据")
+        记状态(('API 未返回数据',), 成功=False)
         return None
 
-    活动列表 = API转活动列表(api原始, 现在字符串, 回溯已结束=回溯已结束)
-
+    try:
+        活动列表 = API转活动列表(api原始, 现在字符串, 回溯已结束=回溯已结束)
+    except Exception:
+        logger.exception('活动解析失败，已保留原文件')
+        记状态(('活动解析失败，请查看日志',), 成功=False)
+        return None
+    问题 = list(getattr(活动列表, '更新问题', ()))
+    if getattr(活动列表, '身份问题', ()):
+        try:
+            检查身份写回(活动列表)
+        except 身份冲突 as exc:
+            logger.error("活动数据未写回，已保留原文件：%s", exc)
+            记状态((*问题, str(exc)), 成功=False)
+            return None
     活动列表 = 合并商店(活动列表)
 
     # 卡池数据
@@ -112,26 +124,31 @@ def 更新数据(现在字符串: str, 回溯已结束: bool = False) -> "数据
         活动列表.extend(抓取卡池一览())
     except Exception:
         logger.exception("获取卡池数据失败")
+        问题.append('卡池一览获取失败，保留已有卡池记录')
 
     活动列表 = 去重排序(活动列表)
+    from .批次隔离 import 隔离批次冲突
+    活动列表 = 隔离批次冲突(活动列表)
+    问题 = list(dict.fromkeys((*问题, *活动列表.更新问题)))
 
-    if 活动列表:
+    if 活动列表 or (Path(settings.all_data_path).exists() and getattr(活动列表, '隔离来源', ())):
         from .数据保护 import 数据保护拦截
 
         try:
-            差异 = 合并保存CSV(活动列表, settings.all_data_path, 现在字符串)
-        except 数据保护拦截 as exc:
-            # 护栏拦下了本次写回（原文件未动）。最常见原因是"现在时间"比数据新，
-            # 例如调试时注入了基准时间。这里只告警，不中断后续渲染。
+            差异 = 合并保存CSV(活动列表, settings.all_data_path, 现在字符串, 重建=回溯已结束)
+        except (数据保护拦截, 身份冲突, OSError) as exc:
             logger.error("活动数据未写回，已保留原文件：%s", exc)
+            记状态((*问题, str(exc)), 成功=False)
             return None
-        logger.info("数据更新完成，共 %d 条活动", len(活动列表))
+        记状态(问题)
+        logger.info("数据更新完成，共 %d 条活动%s", len(活动列表), '（部分来源已隔离）' if 问题 else '')
         # 合并的差异直接写成"今天的日差"（同一天第二次合并不改写），供推送/状态页稍后读取
         from .数据变化 import 记下并取, 默认路径
 
         return 记下并取(默认路径(settings.数据目录), 差异, 现在字符串[:10])
 
     logger.warning("未获取到有效活动")
+    记状态((*问题, '本次没有可安全保存的活动条目'), 成功=False)
     return None
 
 
@@ -375,17 +392,25 @@ def render_once(
         logger.exception("绘制图表失败")
 
     # 节点提醒（只在配置的天数节点上说话；同一天里渲染多少次都是同一份文案）
+    from .更新状态 import 读取更新提示
+    更新提示 = 读取更新提示(settings.数据目录)
+    if not 记录:
+        空数据提示 = '⚠ 当前没有可用活动记录，图中仅有底栏；不能据此判断没有活动。'
+        更新提示 = '\n'.join(filter(None, (更新提示, 空数据提示)))
+    节点命中 = False
     提醒 = ""
     try:
         提醒 = 生成提醒(记录, 现在时间=现在时间,
                         结束偏移们=结束偏移们, 开始偏移们=开始偏移们)
+        节点命中 = bool(提醒)
         if not 提醒:
-            提醒 = 无提醒文案
+            提醒 = ('当前可用记录没有命中节点提醒；部分数据未更新，不能判断排期完整。'
+                    if 更新提示 else 无提醒文案)
         if 控制台打印提醒:
             print("\n" + "=" * 54)
-            print(提醒)
+            print('\n'.join(filter(None, (更新提示, 提醒))))
             print("=" * 54)
-        Path(settings.warning_path).write_text(提醒, encoding="utf-8")
+        Path(settings.warning_path).write_text('\n'.join(filter(None, (更新提示, 提醒))), encoding="utf-8")
         logger.debug("今日提醒已保存至 %s", settings.warning_path)
     except Exception:
         logger.exception("生成提醒失败")
@@ -399,5 +424,6 @@ def render_once(
         名称数=sum(len(新增内容.get(新增键[k]) or []) for k in _WARN_SECTIONS),
         分区计数={区名: len(条目们) for 区名, 条目们 in 分区},
         变化=变化,
-        有提醒=bool(提醒) and 提醒 != 无提醒文案,
+        有提醒=节点命中,
+        更新提示=更新提示,
     )

@@ -14,18 +14,16 @@
    （`src/汇总_活动.py::合并差异` → `src/数据变化.py` 落盘 → `渲染结果.变化`），
    而不是靠复用昨天的图。
 
-### 背景：按自然日确定性抽签
+### 背景：按日期顺序轮换
 
-指定了 `background_file` 就用它（且必须真的存在）；否则 **`候选[crc32(日期) % 张数]`**——
-同一天恒定一张，换天才换。没有缓存之后这不是为了缓存稳定，而是为了**观感稳定**：
-同一天群里看到的图长得一样，不会因为谁先谁后而换配色。
+指定了 `background_file` 就用它（且必须真的存在）；否则按日期顺序轮换背景图。
+同一天保持同一张，换天后切换到下一张，避免同一天重复出图时背景和配色变化。
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import zlib
 from dataclasses import fields, replace
 from datetime import datetime
 from pathlib import Path
@@ -100,23 +98,6 @@ class 渲染服务:
         目录.mkdir(parents=True, exist_ok=True)
         os.environ["MPLCONFIGDIR"] = str(目录)
         return 目录
-
-    def 重建数据(self) -> None:
-        """初始化前的准备：删掉现有 CSV 与当天的日差记录（`/方舟日程 初始化` 用）。
-
-        为什么删：初始化 = **从零重建一份数据**（等价 `cli.py --bootstrap --force`）。
-        不删的话，旧 CSV 里那些"日常窗口扫不到、因此永远得不到修正"的行会一直留着
-        （2026-09-14 的真实例子：按错年份解析出来的"未来活动"）。
-        删掉之后合并会把结果标记为"首次建立"，不会报成"新增几百条"。
-        """
-        csv路径 = self.数据目录 / "所有活动数据.csv"
-        变化路径 = self.数据目录 / "最近数据变化.json"
-        for 路径 in (csv路径, 变化路径):
-            try:
-                路径.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("删不掉（继续，初始化会覆盖它）：%s", 路径, exc_info=True)
-        logger.info("已清空活动数据，准备初始化重建：%s", csv路径)
 
     def 内核设置(self, 运行配置: 运行配置) -> Settings:
         """插件侧路径 + 数值配置 → 内核 Settings。
@@ -252,8 +233,9 @@ class 渲染服务:
         两者各按自己的"今天写过"判断（活动数据是 CSV、首页预告是 `新增预告.json`）：
         分开判断才能避免"CSV 是今天的"让**没抓成的预告**一整天不再重试。
 
-        `回溯已结束=True`（`/方舟日程 初始化`）= 初始化：扫**所有**活动的公告；
-        日常只扫进行中 + 近 30 天结束过的（见 `src/解析_API活动.py`）。
+        `回溯已结束=True`（`/方舟日程 初始化`）= 初始化：扫**最近半年**的活动公告，
+        并把扫描结果**覆盖重建**成新的活动数据（旧行/旧格式不保留）；
+        日常只扫进行中 + 近 7 天结束过的（见 `src/解析_API活动.py`），且是增量合并。
         **全新安装（还没有 CSV）会自动初始化一次**，用户不必自己去点。
         """
         需数据, 需预告 = (True, True) if 强制 else (
@@ -288,7 +270,7 @@ class 渲染服务:
         - 指定了文件名/绝对路径 → 用它（**必须真的存在**：写错文件名要给一句人话，
           而不是让内核拿着一支不存在的图去画——内核在背景读不到时会退回默认配色，
           结果是一张"没人看得出哪里错"的图）；
-        - 否则按**自然日**抽签：`候选[crc32(日期) % 张数]`（同一天恒定一张，见模块 docstring）。
+        - 否则按日期顺序轮换：同一天使用同一张，换天后切换到下一张。
         """
         if 运行配置.指定背景:
             指定 = Path(运行配置.指定背景)
@@ -296,8 +278,13 @@ class 渲染服务:
             if not 路径.is_file():
                 raise 素材缺失(路径.parent, 文件=str(路径))
             return str(路径)
-        候选 = sorted(p for p in Path(设置.bg_dir).glob("*") if p.is_file())
+        图片后缀 = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+        候选 = sorted(
+            p for p in Path(设置.bg_dir).glob("*")
+            if p.is_file() and p.suffix.lower() in 图片后缀
+        )
         if not 候选:
             return None
-        种子 = zlib.crc32(现在时间.date().isoformat().encode("utf-8"))
-        return str(候选[种子 % len(候选)])
+        # 使用自 1970-01-01 起的天数轮换，确保每隔 N 天遍历到下一张。
+        天数 = (现在时间.date() - datetime(1970, 1, 1).date()).days
+        return str(候选[天数 % len(候选)])

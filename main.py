@@ -61,7 +61,7 @@ from .插件.指令 import 甘特图命令, 生成帮助文本  # noqa: E402
 from .插件.渲染 import 字体缺失, 素材缺失, 渲染服务  # noqa: E402
 from .插件.推送 import 推送状态, 推送服务, 加进目标, 移出目标  # noqa: E402
 
-插件版本 = "0.2.1"
+插件版本 = "0.3.0"
 """与 metadata.yaml 的 version 一致（帮助页会显示）。"""
 
 
@@ -248,7 +248,8 @@ class GanttKnightsPlugin(Star):
                 async for 结果文本 in self._刷新流程(event, 运行配置, 回溯已结束=False):
                     yield 结果文本
             else:
-                self.渲染.重建数据()      # 删掉旧 CSV 与当天日差 → 从零重建（多余/错年份的行一并清掉）
+                # 初始化＝覆盖重建：全量扫描后直接替换旧数据（旧行与旧格式都不保留），
+                # 与日常刷新的增量合并是两条路径（2026-10-31 定）。
                 async for 结果文本 in self._刷新流程(event, 运行配置, 回溯已结束=True):
                     yield 结果文本
             return
@@ -267,6 +268,8 @@ class GanttKnightsPlugin(Star):
                 # render_once() 内部会吞掉绘制异常（只记日志）；这里按"文件头魔数完整"再判一次
                 yield event.plain_result(文案.渲染失败)
                 return
+            if 结果.更新提示:
+                yield event.plain_result(结果.更新提示)
             yield event.image_result(str(图片))
         except 素材缺失 as exc:
             yield event.plain_result(文案.说明素材缺失(exc))
@@ -288,8 +291,11 @@ class GanttKnightsPlugin(Star):
             if not self.渲染.产物可用(图片):
                 yield event.plain_result(文案.渲染失败)
                 return
-            if 回溯已结束 and 结果.变化:
-                yield event.plain_result(结果.变化)
+            if 回溯已结束:
+                # 重建后没有"新增/改动"可比（旧行不参与），单独给一句完成确认
+                yield event.plain_result(结果.变化 or 文案.初始化完成)
+            if 结果.更新提示:
+                yield event.plain_result(结果.更新提示)
             yield event.image_result(str(图片))
         except 素材缺失 as exc:
             yield event.plain_result(文案.说明素材缺失(exc))

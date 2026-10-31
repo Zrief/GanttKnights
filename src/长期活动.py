@@ -20,6 +20,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+import re
+
 类型值 = 99
 """长期活动统一的类型编号（类型体系见 `src/活动.py`：0 寻访 / 1 活动 / 2 福利 / 99 长期）。"""
 
@@ -61,3 +64,66 @@ def 前缀名(文本: str) -> str | None:
     """
     名 = 识别(文本)
     return 名 if 名 else None
+
+
+轮换类别 = ('剿灭作战', '保全派驻', '生息演算', '集成战略')
+
+
+def _轮换类别(名称: str) -> str | None:
+    # 现行 官方名「主题」与历史 【玩法】主题 / 「玩法」主题。
+    for alias, canonical in 官方名.items():
+        if canonical not in 轮换类别:
+            continue
+        if (re.fullmatch(re.escape(alias) + r'「[^「」]+」', 名称)
+                or any(名称.startswith(left + alias + right) and 名称[len(alias) + 2:]
+                       for left, right in (('【', '】'), ('「', '」')))):
+            return canonical
+    return None
+
+
+def 排列序列(记录):
+    """同一长期开放玩法（同活动本名）的多个序列：旧序列展示右端截到下一序列开始。
+
+    只改展示副本，不动来源 CSV。占位结束（来源里的整年时间）只用于"存在性"，
+    这里用下一序列开始覆盖它——对应"老主题在新主题出现那一刻截止"（2026-10-31）。
+    """
+    组: dict[str, list[int]] = {}
+    for i, item in enumerate(记录):
+        if item.类型 == 类型值 and item.时间角色 == '长期开放' and item.活动本名:
+            组.setdefault(item.活动本名, []).append(i)
+    result = list(记录)
+    for 位置们 in 组.values():
+        if len(位置们) < 2:
+            continue
+        位置们.sort(key=lambda i: 记录[i].开始)
+        for 前, 后 in zip(位置们, 位置们[1:]):
+            if 记录[后].开始 < result[前].结束:
+                result[前] = replace(result[前], 结束=记录[后].开始)
+    return result
+
+
+def 排列长期(记录):
+    """长期活动的展示排列：先按轮换裁剪，再按序列裁剪。"""
+    return 排列序列(排列轮换(记录))
+
+
+def 排列轮换(记录):
+    """同类新主题开始时裁剪旧展示窗口；返回副本，不改来源数据。
+
+    同一开始时刻允许多个关卡/主题并列；只看严格更晚的下一批开始。
+    来源结束更早则仍用来源结束，不延长；卫戍协议（赛季序列）由 `排列序列` 处理。
+    """
+    starts = {}
+    for item in 记录:
+        kind = _轮换类别(item.名称) if item.类型 == 类型值 else None
+        if kind:
+            starts.setdefault(kind, set()).add(item.开始)
+    timelines = {kind: sorted(values) for kind, values in starts.items()}
+    result = []
+    for item in 记录:
+        kind = _轮换类别(item.名称) if item.类型 == 类型值 else None
+        next_start = next((start for start in timelines.get(kind, ()) if start > item.开始), None)
+        if next_start is not None and next_start < item.结束:
+            item = replace(item, 结束=next_start, 时间角色='长期轮换')
+        result.append(item)
+    return result

@@ -3,7 +3,7 @@
 用法:
     python cli.py                       # 生成 Gantt.jpg（数据每天只爬一次）
     python cli.py --force               # 强制重新爬取
-    python cli.py --bootstrap --force   # 初始化：全量扫所有活动的公告（含剿灭轮换、复刻排期）
+    python cli.py --bootstrap --force   # 初始化：全量扫所有活动的公告后覆盖重建（旧数据不保留）
 
 编排逻辑（"今天要不要爬"这类策略）在本文件；实际渲染在 src/流水线.py，
 与 AstrBot 插件入口（main.py）共用同一条流水线。
@@ -38,7 +38,8 @@ def main(force: bool = False, bootstrap: bool = False, 现在时间: datetime | 
     时间在每次调用时求值：CLI 下与模块导入时刻等价，
     但在长驻进程（AstrBot 插件）里必须是"本次调用"的时间。
 
-    `bootstrap` = 初始化：扫**所有**活动的公告（日常只扫进行中 + 近 30 天结束过的）。
+    `bootstrap` = 初始化：扫**最近半年**的活动公告，并**覆盖重建**活动数据（旧数据不保留；
+    日常只扫进行中 + 近 7 天结束过的，且是增量合并）。
     """
     现在时间 = 现在时间 or datetime.now()
     现在字符串 = 现在时间.strftime("%Y-%m-%d %H:%M:%S")
@@ -81,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--bootstrap",
         action="store_true",
-        help="初始化：先删掉现有数据从零重建（会翻所有历史活动的公告，补录剿灭/保全轮换与复刻排期；数据初次建立或清理改名残留时配合 --force 跑一次）",
+        help="初始化：全量扫描历史活动公告后覆盖重建（旧数据不保留；可顺带把旧格式换成新格式，通常配合 --force）",
     )
     args = parser.parse_args()
     setup_logging()

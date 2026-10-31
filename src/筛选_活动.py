@@ -75,6 +75,9 @@ def _读CSV(路径) -> tuple[list[活动], int]:
                     continue
                 try:
                     类型 = int((row.get("类型") or "").strip())
+                    阶段序号 = int((row.get("阶段序号") or "").strip() or "0")
+                    if 阶段序号 < 0:
+                        raise ValueError("阶段序号不能为负数")
                 except ValueError:
                     坏行 += 1
                     continue
@@ -85,6 +88,10 @@ def _读CSV(路径) -> tuple[list[活动], int]:
                     类型=类型,
                     子类型=(row.get("子类型") or "").strip() or _反推子类型(名称),
                     来源=(row.get("来源") or "").strip(),
+                    活动关联=(row.get("活动关联") or "").strip(),
+                    活动本名=(row.get("活动本名") or "").strip(),
+                    时间角色=(row.get("时间角色") or "").strip(),
+                    阶段序号=阶段序号,
                 ))
     except FileNotFoundError:
         logger.error("数据文件不存在: %s", 路径)
@@ -114,19 +121,24 @@ def preprocess_data(
     记录, 坏行 = _读CSV(路径)
     if not 记录:
         if 坏行:
-            logger.warning("数据文件无可用行（丢弃 %d 条日期/类型无法解析的行）", 坏行)
+            logger.warning("数据文件无可用行（丢弃 %d 条日期/类型/阶段序号无法解析的行）", 坏行)
         else:
             logger.warning("数据文件为空: %s", 路径)
         return []
 
     if 坏行:
-        logger.warning("丢弃 %d 条日期或类型无法解析的活动", 坏行)
+        logger.warning("丢弃 %d 条日期、类型或阶段序号无法解析的活动", 坏行)
+
+    # 轮换/序列都基于完整来源记录计算，不能先按图右边界丢掉下一主题。
+    from .长期活动 import 排列长期
+    记录 = 排列长期(记录)
 
     # 过滤：剔除已结束超过 future_buffer_hours 的、以及起点晚于右边界的、以及商店(-1)
     截止 = now + timedelta(hours=settings.future_buffer_hours)
     筛选后 = [
         e for e in 记录
         if e.结束 > 截止 and e.开始 < right_border and e.类型 != -1
+        and not any(word in e.名称 for word in ('主题场景', '全息作战矩阵'))
     ]
 
     if not 筛选后:

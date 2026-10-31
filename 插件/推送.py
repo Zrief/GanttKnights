@@ -352,8 +352,9 @@ class 推送服务:
           用 `str.replace` 而**不是** `str.format`——用户模板里写别的 `{}`（颜文字之类）不该炸；
           模板留空 = 不附文字（等价于关掉文字）。
         """
+        更新提示 = getattr(结果, '更新提示', '')
         if not getattr(结果, "有提醒", False):
-            return ""
+            return 更新提示
         模板 = 运行配置.推送文案模板 if 运行配置 is not None else "{提醒}"
         替换 = {
             "{提醒}": 结果.提醒,
@@ -363,4 +364,4 @@ class 推送服务:
         文本 = 模板
         for 占位符, 值 in 替换.items():
             文本 = 文本.replace(占位符, 值)
-        return 文本
+        return '\n'.join(filter(None, (更新提示, 文本)))

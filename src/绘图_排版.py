@@ -42,9 +42,9 @@ from PIL import Image as PILimage
 from PIL import ImageChops, ImageDraw
 
 from .config import settings
-from .甘特行 import 分行
+from .甘特行 import 分行, 是多时段行
 from .绘图_图表 import 缩放图片
-from .绘图_颜色 import set_alpha_channel
+from .绘图_颜色 import set_alpha_channel, 乘色
 from .绘图_主题 import 主题
 from .字体 import 注册字体, 字体指纹
 from .提醒文案 import 展示名
@@ -58,10 +58,17 @@ from .日志 import logger
 
 顺序与 `活动.子类型顺序` 一致。组数比大类多，但每组名都是两个字，左列宽度不用改。"""
 
+组别名 = {"甄选": "限时"}
+"""左列归类：中坚甄选并入「限时」（2026-10-31 用户要求）。
+
+只影响左列分组、配色与行序——数据里的 `子类型` 仍是「甄选」（`展示名` 据此剥卡池前缀），
+CSV 与提醒都不变。"""
+
 
 def 组标签(条目) -> str:
-    """一条记录归到哪个左列分组：有子类型就用子类型，否则用大类的关键词。"""
-    return 条目.子类型 or 类型关键词.get(条目.类型, "")
+    """一条记录归到哪个左列分组：有子类型就用子类型（可被 `组别名` 归并），否则用大类关键词。"""
+    标 = 条目.子类型 or 类型关键词.get(条目.类型, "")
+    return 组别名.get(标, 标)
 
 
 
@@ -134,6 +141,14 @@ DPI = 150
 行高px = 228              # 每行底栏卡片高度
 行间距px = 36             # 行与行之间
 
+# —— 多时段行（同一活动的一/二/三阶段＋商店、预选/招募）——
+# 它比普通行高：外框里要放两个"bar 槽"——上面是活动名（占槽但不画条），
+# 下面是子阶段条。槽高与普通条一致，槽间留一点缝，外框上下再各留 6px。
+普通条高px = 甘特行高px * 0.60
+多时段槽间px = 12
+多时段框高px = round(2 * 普通条高px + 多时段槽间px + 12)
+多时段行高px = 多时段框高px + 12
+
 # —— 底栏排版参数 ——
 格宽最小px = 128
 格宽最大px = 210
@@ -162,12 +177,21 @@ DPI = 150
 头像描边px = 2
 
 
-def 组弧度表() -> dict[str, float]:
+def 组弧度表(额外标签们=()) -> dict[str, float]:
     """左列分组 → 色弧上的位置（主色 → 副色连续过渡）。
 
     组名、左列色轨、组内每根条的条色三处同源——一个颜色，一眼对得上。
+
+    组名不在 `组顺序` 里时（例如某天出现没有子类型的新分类），**不能默认落回 0**：
+    那会和「限时」撞成同一个颜色，条色与左列标签看起来就"错位"了。这里把这类标签
+    按名字排序接到色弧末尾，各占一个位置，至少不会与已有组同色。
     """
-    return {名: i / (len(组顺序) - 1) for i, 名 in enumerate(组顺序)}
+    名们 = list(组顺序)
+    for 名 in sorted({n for n in 额外标签们 if n and n not in 名们}):
+        名们.append(名)
+    if len(名们) == 1:
+        return {名们[0]: 0.0}
+    return {名: i / (len(名们) - 1) for i, 名 in enumerate(名们)}
 
 
 def 区弧度表() -> dict[str, float]:
@@ -313,9 +337,9 @@ def 选版面(分区: list[tuple[str, list[dict]]],
 
 背景透明度 = 0.55         # 背景图叠加时的 alpha
 # 压暗后背景亮度 p95 的目标值（0~1）：越大背景越清楚。
-# 取 0.27 是为了让两张性格不同的背景图各自保留反差比例（固定系数会把它们压成同一种纹理）。
-# 背景图自带的 logo/水印不属于我们要处理的问题，素材什么样就是什么样。
-背景目标P95 = 0.27
+# 0.27 → 0.18（2026-10-31）：多时段行、长期条等元素变多后，背景纹理开始抢注意力，
+# 整体再压暗一档；仍按图反解，所以换背景时暗度保持一致。
+背景目标P95 = 0.18
 
 
 def 压暗系数(底图: np.ndarray, 深底色: str) -> float:
@@ -324,6 +348,9 @@ def 压暗系数(底图: np.ndarray, 深底色: str) -> float:
     固定系数（原来是 0.42）会把两张性格完全不同的图压成同一种纹理：
     实测输入反差差 15%，输出极差却完全相同。改成按图反解后，每张图保留自己的
     反差比例，而整体仍然是"有氛围的暗纹理"。
+
+    夹取下限 0.22：亮背景（源 p95 常在 0.7 以上）要压到 0.18 需要更小的系数，
+    旧的 0.30 下限会让这类图"压不下去"，只能靠深底稀释。
     """
     源p95 = float(np.percentile(底图.mean(axis=2), 95))
     if 源p95 <= 0.02:
@@ -331,13 +358,41 @@ def 压暗系数(底图: np.ndarray, 深底色: str) -> float:
     r, g, b = (int(深底色[i:i + 2], 16) / 255 for i in (1, 3, 5))
     底亮度 = 0.2126 * r + 0.7152 * g + 0.0722 * b
     系数 = (背景目标P95 - 底亮度 * (1 - 背景透明度)) / (源p95 * 背景透明度)
-    return float(np.clip(系数, 0.30, 0.55))
+    return float(np.clip(系数, 0.22, 0.55))
 
 
-def 总高计算(事件数: int, 行数: int) -> tuple[list[int], int]:
+def 行们排序(行们: list[list]) -> list[list]:
+    """组内按**整行最晚结束**升序排；同结束时按开始、再按名称。
+
+    - 组间次序仍是 `组顺序`（左列从上到下），不因时间改变；
+    - 多时段行取组内最晚结束（例如 SS 到商店截止、特别招募到招募结束），
+      否则它会因为"最早开始的成员"被插到组首，把整组顺序打乱（2026-10-31 实测）；
+    - 只影响画图：不动 CSV 顺序、不动 `筛选_活动` 的排序，提醒与底栏不受影响。
+    """
+    def 键(行):
+        组 = 组标签(行[0])
+        位置 = 组顺序.index(组) if 组 in 组顺序 else len(组顺序)
+        return (位置, max(t.结束 for t in 行), min(t.开始 for t in 行),
+                tuple(t.名称 for t in 行))
+    return sorted(行们, key=键)
+
+
+def 行们行高(行们: list[list]) -> tuple[int, ...]:
+    """每行的实际像素高：多时段行更高，其余仍是 `甘特行高px`。
+
+    行高只能有一个出处——`总高计算`、`建分区画布`、`填甘特区` 都吃这一份。
+    """
+    return tuple(多时段行高px if 是多时段行(行) else 甘特行高px for 行 in 行们)
+
+
+def 总高计算(事件数: int, 行数: int, 行高们: tuple[int, ...] = ()) -> tuple[list[int], int]:
     """各段高度比例表与总高（px）。定宽（定图宽）与建画布共用同一份——
-    "图多高"只能有一个出处，两处各算各的迟早又跑出一块底部空白。"""
-    甘特高px = 甘特轴带px + max(事件数, 1) * 甘特行高px + 甘特底px
+    "图多高"只能有一个出处，两处各算各的迟早又跑出一块底部空白。
+
+    `行高们` 给了就按它逐行累加（多时段行更高），没给退回旧的等行高。
+    """
+    甘特高px = 甘特轴带px + (sum(行高们) if 行高们
+                            else max(事件数, 1) * 甘特行高px) + 甘特底px
     比例 = [页眉高px, 页眉间距px, 甘特高px, 甘特间距px]
     for i in range(max(行数, 0)):
         if i:
@@ -346,7 +401,8 @@ def 总高计算(事件数: int, 行数: int) -> tuple[list[int], int]:
     return 比例, sum(比例) + 边距下px
 
 
-def 定图宽(事件数: int, 分区: list[tuple[str, list[dict]]]) -> tuple[int, list, int]:
+def 定图宽(事件数: int, 分区: list[tuple[str, list[dict]]],
+         行高们: tuple[int, ...] = ()) -> tuple[int, list, int]:
     """宽度跟着内容走：按最大宽先装箱 → 总高 × 目标比定宽（夹取）→ 按新宽度重装一次。
 
     装箱是纯计算（`选版面` 不碰 matplotlib），跑两遍开销可忽略。重装后行数可能变，
@@ -354,18 +410,19 @@ def 定图宽(事件数: int, 分区: list[tuple[str, list[dict]]]) -> tuple[int
     返回 (图宽px, 底栏行们, 格宽px)，后两个是**最终宽度下**的装箱结果。
     """
     行们, 格宽px = 选版面(分区, 图宽最大px - 边距左px - 边距右px)
-    _, 总高px = 总高计算(事件数, len(行们))
+    _, 总高px = 总高计算(事件数, len(行们), 行高们)
     图宽px = int(max(图宽最小px, min(图宽最大px, round(总高px * 目标宽高比))))
     if 图宽px != 图宽最大px:
         行们, 格宽px = 选版面(分区, 图宽px - 边距左px - 边距右px)
     return 图宽px, 行们, 格宽px
 
 
-def 建分区画布(事件数: int, 行数: int, 主题: 主题, 背景路径: str | Path, 图宽px: int):
+def 建分区画布(事件数: int, 行数: int, 主题: 主题, 背景路径: str | Path, 图宽px: int,
+              行高们: tuple[int, ...] = ()):
     """从上到下：页眉、甘特图、行数 行底栏。每段高度按像素给定，
     再用 0 间距的 GridSpec 精确落位（height_ratios 的一个单位 = 一个像素）"""
     plt.rcParams["font.size"] = 10
-    比例, 总高px = 总高计算(事件数, 行数)
+    比例, 总高px = 总高计算(事件数, 行数, 行高们)
     fig = plt.figure(figsize=(图宽px / DPI, 总高px / DPI), dpi=DPI, facecolor=主题.深底)
     # 背景图铺满整张画布（figimage 垫在所有内容之下），压暗后垫底
     try:
@@ -435,10 +492,62 @@ def 填页眉(ax, fig, 主题: 主题, 现在: datetime, 标题: str = 图标题
 
 # ============================ 甘特图 ============================
 
+
+def 画多时段框(ax, 框x, 框y, 框w, 框h, 左裁, 右裁, 段色, 主题: 主题,
+           名槽y: float, 槽高: float) -> None:
+    """多时段行的外框（A 轻主题框，2026-10-31 定）。
+
+    - 填充用**主题更深色 75%**：明显压出一块"这是同一个活动"的底，但不用纯黑，
+      和整张图的深色体系同源；实测填充/背景对比 1.74、边线/填充 2.02（灰阶中位亮度）；
+    - 边框从白色虚线换成**次级文字色 1.2px 实线**（上下沿），真实起止端点用 2.4px 加重；
+    - 被窗口裁掉的一侧不画竖边，表示条还在继续。
+    """
+    ax.add_patch(FancyBboxPatch((框x, 框y), 框w, 框h,
+                                boxstyle="round,pad=0,rounding_size=4",
+                                facecolor=主题.更深, alpha=0.75,
+                                edgecolor="none", zorder=2.2))
+    笔 = dict(color=主题.次文, linewidth=1.2, alpha=0.40,
+             solid_capstyle="butt", zorder=2.4)
+    ax.add_line(Line2D([框x, 框x + 框w], [框y + 框h, 框y + 框h], **笔))
+    ax.add_line(Line2D([框x, 框x + 框w], [框y, 框y], **笔))
+    端笔 = dict(color=主题.次文, linewidth=2.4, alpha=0.60,
+               solid_capstyle="butt", zorder=2.6)
+    if not 左裁:
+        ax.add_line(Line2D([框x, 框x], [框y, 框y + 框h], **端笔))
+    if not 右裁:
+        ax.add_line(Line2D([框x + 框w, 框x + 框w], [框y, 框y + 框h], **端笔))
+
+
+def 画左列组(ax, 组底: float, 组顶: float, 列宽: float, 标签: str,
+           组色: str, 主题: 主题) -> None:
+    """左列的一个分组：压暗彩底 + 组名（2026-10-31 定）。
+
+    组名写在**整组的垂直中心**：跨多行时那是视觉中心，而不是"只属于第一行"；
+    组内每行不再重复写，靠左列这条色轨认（颜色与条色同源，一眼对得上）。
+
+    彩底从"组色 alpha 0.17"改成**组色 ×0.16 的不透明实底**：半透明时背景纹理
+    会从下面透上来，同一行字时段清楚、时段发虚。压暗成实底后纹理被盖住，
+    组色彩字对底的对比实测 4.4~4.8（灰阶），比原来稳定。
+
+    组覆盖 起..止 **全部行**：顶是首行的行顶，底是末行的行底。
+    （此前写成 行底(起)-行底(止)，漏掉首行高度，每组色轨都少一格。）
+    """
+    ax.add_patch(Rectangle((0, 组底), 列宽, 组顶 - 组底,
+                           facecolor=乘色(组色, 0.16), alpha=1.0, edgecolor="none", zorder=0.6))
+    ax.text(18, (组底 + 组顶) / 2,
+            标签, fontsize=11.5,
+            color=组色, ha="left", va="center", zorder=4,
+            fontweight=粗字重, path_effects=粗体(主题.更深, 0.8))
+
+
 def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界: datetime,
-            现在: datetime) -> None:
+            现在: datetime, 行高们: tuple[int, ...] = (), 行们: list[list] | None = None) -> None:
     """整幅绘图区 + 顶部日期轴带 + 每日竖网格 + TODAY 通栏线；
-    事件名写在条上（沿用原版做法），条太短放不下时用箭头引到条外"""
+    事件名写在条上（沿用原版做法），条太短放不下时用箭头引到条外。
+
+    `行们` / `行高们` 由调用方按**同一份分行结果**传入：可变行高必须与行一一对应，
+    两边各分一次行（尤其是正序/倒序不同）会把行高套到别的活动上。
+    """
     bb = ax.get_position()
     轴宽 = bb.width * fig.bbox.width
     轴高 = bb.height * fig.bbox.height
@@ -457,15 +566,138 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
     def x(小时: float) -> float:
         return 甘特左列px + 小时 / 总小时 * 绘图宽px
 
+    def 行高(i: int) -> float:
+        return 行高们[i] if 行高们 else 甘特行高px
+
+    def 行顶(i: int) -> float:
+        return 顶 - sum(行高(k) for k in range(i))
+
+    def 行底(i: int) -> float:
+        return 行顶(i) - 行高(i)
+
     显示 = list(reversed(记录))   # 倒序：卡池在上、长期在下（沿用原图观感）
-    弧度 = 组弧度表()
     名字号 = 15
 
+    def 放条名(名: str, 左x: float, 右x: float, y中: float, 字号: float, 色: str,
+             外置: bool = True) -> None:
+        """条名放哪儿：条内放得下就居中，放不下引到条外，再不行截断。
+
+        与单条活动共用同一套判断（2026-10-31 定：多时段行也要走这套，不能写死位置）——
+        窗口把条压得很窄时，名字会自动移到条外，而不是糊出画布。
+        """
+        宽 = 文本宽(名, 字号, weight=条名_字重)
+        内宽 = 右x - 左x
+        if 内宽 >= 宽 + 26:
+            ax.text((左x + 右x) / 2, y中, 名, fontsize=字号, color=色,
+                    ha="center", va="center", zorder=4, fontweight=条名_字重)
+            return
+        if 外置 and 轴宽 - 右x >= 宽 + 60:
+            ax.annotate(名, xy=(右x, y中), xytext=(右x + 14, y中),
+                        arrowprops=dict(arrowstyle="-", color=主题.次文, lw=1.2),
+                        fontsize=字号, color=主题.主文, fontweight=条名_字重,
+                        ha="left", va="center", zorder=4)
+            return
+        if 外置 and 左x - 甘特左列px >= 宽 + 60:
+            ax.annotate(名, xy=(左x, y中), xytext=(左x - 14, y中),
+                        arrowprops=dict(arrowstyle="-", color=主题.次文, lw=1.2),
+                        fontsize=字号, color=主题.主文, fontweight=条名_字重,
+                        ha="right", va="center", zorder=4)
+            return
+        if 内宽 > 40:
+            ax.text((左x + 右x) / 2, y中, 截到宽(名, 内宽 - 10, 字号, weight=条名_字重),
+                    fontsize=字号, color=色, ha="center", va="center",
+                    zorder=4, fontweight=条名_字重)
+
+    def 画多时段行(行, 条色, y底, y顶) -> None:
+        """同一活动的多时段画成**一行**：外框 + 名字槽（占槽但不画条）+ 子阶段条。
+
+        切法（2026-10-31 定）：
+        - 阶段共同结束（逐步开放）→ 条从最早开启连到共同结束，按各阶段**开启时刻**竖切分段；
+          每段代表"该时段新增的阶段"。前阶段不会因为后阶段开启而失效，所以条是连续的。
+        - 否则（预选/招募这类接续）→ 各阶段按真实起止排在同一条线上，朝内一侧竖切，
+          真实空档留白不填。
+        - 商店比战斗结束时接在末尾，与阶段同一套竖切、同一颜色。
+        - 被窗口边界截断的一侧一律竖切、不画分隔线；外框那一侧也不画虚线边（表示还在继续）。
+        """
+        本名 = 行[0].活动本名 or 行[0].名称
+        序 = sorted(行, key=lambda t: (t.时间角色 == '兑换开放',
+                                      t.阶段序号 if t.时间角色 == '关卡开放' else 0, t.开始))
+        战斗 = [t for t in 序 if t.时间角色 != '兑换开放']
+        商店 = [t for t in 序 if t.时间角色 == '兑换开放']
+        基 = 弧度.get(组标签(行[0]), 0.0)
+        段色 = 主题.大色块(基)
+
+        def 小时(t) -> float:
+            return (t - 左边界).total_seconds() / 3600
+
+        def 段名(t) -> str:
+            if t.时间角色 == '兑换开放':
+                return '商店'
+            if t.时间角色 == '关卡开放':
+                return '一二三四五六七八九十'[t.阶段序号 - 1] + '阶段'
+            return t.名称.rsplit('·', 1)[-1]
+
+        同止 = len({t.结束 for t in 战斗}) == 1
+        总止 = max(t.结束 for t in 战斗) if 战斗 else 行[0].结束
+        尾 = [t for t in 商店 if t.结束 > 总止]
+        段们: list[tuple[float, float, str, bool]] = []
+        if 同止 and len(战斗) > 1:
+            起们 = sorted({t.开始 for t in 战斗})
+            对段 = {t.开始: t for t in 战斗}
+            边界 = [小时(t) for t in 起们] + [小时(总止)]
+            for k in range(len(边界) - 1):
+                段们.append((边界[k], 边界[k + 1], 段名(对段[起们[k]]),
+                           k < len(边界) - 2 or bool(尾)))
+        else:
+            for k, t in enumerate(战斗):
+                段们.append((小时(t.开始), 小时(t.结束), 段名(t), k < len(战斗) - 1))
+        if 尾:
+            段们.append((小时(总止), 小时(尾[0].结束), '商店', False))
+
+        起h = min(段[0] for 段 in 段们)
+        止h = max(段[1] for 段 in 段们)
+        框x = x(max(起h, 0))
+        框y = y底 + 6
+        框w = x(min(止h, 总小时)) - 框x
+        框h = (y顶 - y底) - 12
+        左裁 = 框x <= x(0) + 0.6
+        右裁 = 框x + 框w >= x(总小时) - 0.6
+        if 框w <= 2 or 框h <= 2:
+            return
+        段高 = 普通条高px
+        段y = 框y + 6
+        名槽y = 段y + 段高 + 多时段槽间px
+        画多时段框(ax, 框x, 框y, 框w, 框h, 左裁, 右裁, 段色, 主题, 名槽y, 段高)
+
+        # 两个"bar 槽"：上层同高同位置但不画条，只放名字；下层放子阶段条。
+        切点: list[float] = []
+        for 左h, 右h, 名, 有右邻 in 段们:
+            a = max(左h, 0)
+            b = min(右h, 总小时)
+            if b <= a:
+                continue
+            ax.add_patch(Rectangle((x(a), 段y), x(b) - x(a), 段高,
+                                   facecolor=段色, edgecolor="none", zorder=3))
+            if 有右邻 and b < 总小时 - 0.01:
+                切点.append(b)      # 窗口边缘不是阶段分界，不切
+            放条名(名, x(a), x(b), 段y + 段高 / 2, 13.5, 主题.对色(段色))
+        for b in 切点:
+            ax.add_line(Line2D([x(b), x(b)], [段y, 段y + 段高], color=主题.更深,
+                               linewidth=2.8, alpha=0.75,
+                               solid_capstyle="butt", zorder=4.2))
+        名槽y = 段y + 段高 + 多时段槽间px
+        放条名(本名, 框x + 8, 框x + 框w - 8, 名槽y + 段高 / 2, 15.5, 主题.主文)
+
     def 画合并行(行, 条色, y0, y中, 条高) -> None:
-        """把 N 个常驻条目画在**同一行**里：条铺满全图、按数量斜切等分、每段写名字。
+        """把 N 个常驻条目画在**同一行**里：条铺满全图、斜切分段、每段写名字。
 
         分隔用**斜线**而不是竖线：甘特区里的竖线是日期网格，竖着切会被读成"某个时间点"，
         斜切才看得出"这几条是并列的，不是首尾相接"。
+
+        段宽按各段**名字宽度加权**分配（2026-10-29 定，此前等分）：等分时长名段
+        （集成战略「沉沦者的黑流树海」）挤到贴边、短名段（卫戍协议「规程」）大片
+        空白——名字宽的段理应分到更宽的地盘。需求 = 名宽 + 左右余量，按需求比例
+        摊整行宽；名字都放不下时等比例压缩（每段同挤，谁也不独占余量）。
         """
         x0, x1 = x(0), x(总小时)
         条 = FancyBboxPatch((x0, y0), x1 - x0, 条高,
@@ -474,11 +706,14 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         条.set_path_effects([SimplePatchShadow(offset=(0, -3), alpha=0.30), Normal()])
         ax.add_patch(条)
 
-        段宽 = (x1 - x0) / len(行)
+        名宽们 = [文本宽(展示名(t.名称), 条名_字号, weight=条名_字重) + 26 for t in 行]
+        段宽们 = [w / sum(名宽们) * (x1 - x0) for w in 名宽们]
+        段左们 = [x0]
+        for w in 段宽们[:-1]:
+            段左们.append(段左们[-1] + w)
         斜量 = 条高 * 0.45      # 斜线的水平投影：太立像竖线，太平像斜杠
         字色 = 主题.对色(条色)
-        for k, 条目 in enumerate(行):
-            段左 = x0 + k * 段宽
+        for k, (条目, 段左, 段宽) in enumerate(zip(行, 段左们, 段宽们)):
             if k:
                 ax.add_line(Line2D([段左 - 斜量 / 2, 段左 + 斜量 / 2], [y0, y0 + 条高],
                                    color=主题.更深, linewidth=3.2, alpha=0.78,
@@ -487,9 +722,14 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
                     ha="center", va="center", zorder=4, clip_path=条, fontweight=条名_字重,
                     path_effects=粗体(字色, 条名_描边))
 
-    # 行 = 若干条目：铺满全图的常驻条并成一行，其余各自一行（见 `分行`）
-    行们 = 分行(显示, 左边界, 右边界)
+    # 行 = 若干条目：多时段组各占一行、铺满全图的常驻条并成一行，其余各自一行（见 `分行`）
+    行们 = 行们 if 行们 is not None else 分行(显示, 左边界, 右边界)
+    if 行高们 and len(行高们) != len(行们):
+        logger.warning('行高与行数不一致（%d vs %d），退回等行高', len(行高们), len(行们))
+        行高们 = ()
     行标签们 = [组标签(行[0]) for 行 in 行们]
+    # 色弧按**实际出现的分组**建表：新分类不会回落到「限时」同色（2026-10-31 修）
+    弧度 = 组弧度表(行标签们)
 
     # 标签相同的连续**行**归为一个功能块，块内给左列一条色轨、块间加分隔线，
     # 这样即使相邻两组的颜色相近，也能一眼看出分组边界
@@ -503,18 +743,12 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
         i = j + 1
     for 起, 止, 标签 in 组们:
         组色 = 主题.大色块(弧度.get(标签, 0.0))
-        ax.add_patch(Rectangle((0, 顶 - (止 + 1) * 甘特行高px), 甘特左列px,
-                               (止 - 起 + 1) * 甘特行高px,
-                               facecolor=组色, alpha=0.17, edgecolor="none", zorder=0.6))
-        # 组名写在**整组的垂直中心**：跨多行时那是视觉中心，而不是"只属于第一行"；
-        # 组内每行不再重复写，靠左列这条色轨认（颜色仍与条色同源，一眼对上）
-        ax.text(18, 顶 - (起 + (止 - 起 + 1) / 2) * 甘特行高px,
-                标签, fontsize=11.5,
-                color=组色, ha="left", va="center", zorder=4,
-                fontweight=粗字重, path_effects=粗体(组色, 0.6))
+        画左列组(ax, 行底(止), 行顶(起), 甘特左列px, 标签, 组色, 主题)
     for 起, _, _ in 组们[1:]:
-        y = 顶 - 起 * 甘特行高px
-        ax.add_line(Line2D([0, 轴宽], [y, y], color=主题.主文, alpha=0.26,
+        y = 行顶(起)
+        # 分隔线只留左列那一段（给左列分组封边）；甘特区里不画——
+        # 图内元素多，一条横贯的亮线会把注意力从条上拉走（2026-10-31）。
+        ax.add_line(Line2D([0, 甘特左列px], [y, y], color=主题.主文, alpha=0.26,
                            linewidth=1.8, zorder=2.6))
 
 
@@ -538,15 +772,19 @@ def 填甘特区(ax, fig, 记录, 主题: 主题, 左边界: datetime, 右边界
     for i, 行 in enumerate(行们):
         代表 = 行[0]
         条色 = 主题.大色块(弧度.get(组标签(代表), 0.0))
-        y顶 = 顶 - i * 甘特行高px
-        y底 = y顶 - 甘特行高px
+        y顶 = 行顶(i)
+        y底 = 行底(i)
 
         ax.add_line(Line2D([0, 轴宽], [y底, y底], color=主题.分隔, linewidth=1, zorder=2))
-        ax.add_patch(Rectangle((0, y底), 7, 甘特行高px, facecolor=条色,
+        ax.add_patch(Rectangle((0, y底), 7, 行高(i), facecolor=条色,
                                edgecolor="none", zorder=3))
-        条高 = 甘特行高px * 0.60
-        y0 = y底 + (甘特行高px - 条高) / 2
+        条高 = 普通条高px
+        y0 = y底 + (行高(i) - 条高) / 2
         y中 = y0 + 条高 * 0.5
+
+        if 是多时段行(行):          # 同一活动的多时段：外框 + 名字槽 + 子阶段条
+            画多时段行(行, 条色, y底, y顶)
+            continue
 
         if len(行) > 1:            # 常驻合并行：斜切等分
             画合并行(行, 条色, y0, y中, 条高)
@@ -759,11 +997,17 @@ def 绘制甘特图(输出路径: str | Path, 分区: list[tuple[str, list[dict]
     有效 = [(区名, 条目们) for 区名, 条目们 in 分区 if 条目们]
     # ⚠️ 两个"行"不是一回事：`底栏行们` 是底栏的卡片行，甘特的行数得按 `分行()` 算——
     # 铺满全图的常驻条会并成一行，还用 len(记录) 就会在甘特底下多留一块空白（2026-09-24 修）。
-    甘特行数 = len(分行(记录, 左边界, 右边界))
-    图宽px, 底栏行们, 格宽px = 定图宽(甘特行数, 有效)
-    fig, gs, ax_页眉, ax_chart = 建分区画布(甘特行数, len(底栏行们), 主题, 背景路径, 图宽px)
+    # 行高也不再等长：多时段行（外框+名字槽+子阶段）更高。
+    # 分行与行高、绘制必须用**同一份**行列表——这里按绘制顺序（记录倒序）分一次，传下去。
+    # 再按“组内结束时间升序”排一次：组间次序不变，只把同一类别里的行按结束时间归位。
+    甘特行们 = 行们排序(分行(list(reversed(记录)), 左边界, 右边界))
+    甘特行数 = len(甘特行们)
+    高度们 = 行们行高(甘特行们)
+    图宽px, 底栏行们, 格宽px = 定图宽(甘特行数, 有效, 高度们)
+    fig, gs, ax_页眉, ax_chart = 建分区画布(甘特行数, len(底栏行们), 主题, 背景路径,
+                                        图宽px, 高度们)
     填页眉(ax_页眉, fig, 主题, 现在, 标题, 数据时间)
-    填甘特区(ax_chart, fig, 记录, 主题, 左边界, 右边界, 现在)
+    填甘特区(ax_chart, fig, 记录, 主题, 左边界, 右边界, 现在, 高度们, 甘特行们)
     for r, 行 in enumerate(底栏行们):
         填行(行轴(fig, gs, r), fig, 行, 格宽px, 主题)
     目标 = Path(输出路径)

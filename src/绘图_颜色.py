@@ -1,7 +1,7 @@
 """颜色工具 — Oklab ⇄ sRGB 转换与 alpha 通道处理
 
 只放底层数学与图像工具；配色（主色 / 副色 / 警告色的推导）在 src/绘图_主题.py，
-排版层用 set_alpha_channel 给背景图叠透明度。
+排版层用 set_alpha_channel 给背景图叠透明度、用 乘色 压暗左列彩底。
 """
 
 from __future__ import annotations
@@ -79,3 +79,16 @@ def set_alpha_channel(image_data: np.ndarray, alpha_value: float) -> np.ndarray:
         out = image_data.copy()
         out[:, :, 3] = alpha_val
         return out
+
+
+def 乘色(色: str, k: float) -> str:
+    """按比例压暗/提亮一个十六进制颜色（保留色相）：k=1 原色，0 全黑。
+
+    左列彩底用 `乘色(组色, 0.16)` 压成暗色调实底——纹理不再透上来，
+    组色彩字（原色）压在它上面才有稳定对比（2026-10-31）。
+    """
+    if not (isinstance(色, str) and 色.startswith('#') and len(色) == 7):
+        raise ValueError('颜色必须是 #rrggbb 形式')
+    k = max(0.0, min(1.0, float(k)))
+    值 = [max(0, min(255, round(int(色[i:i + 2], 16) * k))) for i in (1, 3, 5)]
+    return '#%02x%02x%02x' % tuple(值)
